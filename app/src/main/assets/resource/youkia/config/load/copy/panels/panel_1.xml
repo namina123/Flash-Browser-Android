@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config> 
+	<ui> 
+		<item type="UILibs/copy/panels"
+			  name="panel"
+			  isnew="0"
+			  version="_1">资源</item> 
+	</ui>  
+</config>

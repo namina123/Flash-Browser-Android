@@ -1,0 +1,25 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<config> 
+	<ui> 
+		<item type="UILibs/copy"
+			  name="stonescene"
+			  isnew="0"
+			  version="_2013070219">场景资源</item> 
+		<item type="UILibs/shaketree"
+			  name="jewelpics"
+			  isnew="0"
+			  version="_2013052311">宝石图片</item>
+		<item type="UILibs/copy"
+			  name="stonereward"
+			  isnew="0"
+			  version="_20130710">宝石奖励</item>
+		<item type="UILibs/copy"
+			  name="stonecom"
+			  isnew="0"
+			  version="_2013070414">宝石公用资源</item>
+		<item type="UILibs/copy"
+			  name="avatars"
+			  isnew="0"
+			  version="_2013062813">宝石头像</item>
+	</ui>  
+</config>

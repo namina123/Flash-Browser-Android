@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config> 
+	<ui> 
+		<item type="UILibs/genius"
+			  name="JewelSystem"
+			  isnew="0"
+			  version="_20150105">宝石系统</item> 
+	</ui>  
+</config>

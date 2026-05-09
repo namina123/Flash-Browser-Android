@@ -1,0 +1,6 @@
+<config>
+	<ui>
+		<item type="UILibs/copy" name="limitCopy" isnew="0" version="_20130702">限时副本</item>
+		<item type="UILibs/copy" name="avatars" isnew="0" version="_2013062813">头像</item>
+	</ui>
+</config>

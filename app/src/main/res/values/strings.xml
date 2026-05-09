@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name">Flash浏览器</string>
+    <string name="url_hint">输入网址或搜索词</string>
+    <string name="go">打开</string>
+    <string name="back">后退</string>
+    <string name="forward">前进</string>
+    <string name="refresh">刷新</string>
+    <string name="settings">设置</string>
+    <string name="orientation_settings">屏幕方向设置</string>
+    <string name="orientation_landscape">默认横屏</string>
+    <string name="orientation_portrait">默认竖屏</string>
+    <string name="orientation_system">跟随系统</string>
+    <string name="mapping_config_path">显示映射配置路径</string>
+    <string name="cookie_profiles">Cookie 配置</string>
+    <string name="cookie_profile_title">选择 Cookie 配置</string>
+    <string name="cookie_file_name">文件名：%1$s</string>
+    <string name="cookie_user_name">用户：%1$s</string>
+    <string name="cookie_apply">应用</string>
+    <string name="cookie_no_profiles">没有可用的 Cookie XML 配置</string>
+    <string name="cookie_storage_permission_needed">需要存储权限才能访问 PVZOLcookies 文件夹</string>
+    <string name="cookie_storage_permission_granted_tip">请在系统页面授予“所有文件访问权限”</string>
+    <string name="cookie_copy_failed">初始化 Cookie 配置失败</string>
+    <string name="cookie_applied">Cookie 已应用</string>
+</resources>

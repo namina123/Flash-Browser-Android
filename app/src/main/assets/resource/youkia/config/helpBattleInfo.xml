@@ -1,0 +1,205 @@
+<root>
+  <response>
+    <status>success</status>
+  </response>
+  <fight>
+    <assailants>
+      <item id="1" hp="500" hp_max="500"/>
+      <item id="2" hp="1100" hp_max="1100"/>
+      <item id="3" hp="540" hp_max="540"/>
+      <item id="4" hp="960" hp_max="960"/>
+      <item id="5" hp="360" hp_max="360"/>
+      <item id="6" hp="800" hp_max="800"/>
+    </assailants>
+    <defenders>
+      <item id="1" hp="450"/>
+      <item id="2" hp="440"/>
+      <item id="3" hp="550"/>
+      <item id="4" hp="240"/>
+      <item id="5" hp="440"/>
+      <item id="6" hp="210"/>
+    </defenders>
+    <awards_key>0bd613fc0445c6e095ce2fe4d4e9b404</awards_key>
+    <win>assailant</win>
+    <process>
+
+
+      <item attack="75">
+        <assailant type="assailant" id="1"/>
+		<defender>
+        <item id="1" old_hp="450" hp="338"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="1" name="光弹" batter="0" grade="1" organism_attr="1"/>
+        </skills>
+      </item>
+      <item attack="165">
+        <assailant type="assailant" id="2"/>
+		<defender>
+        <item id="1" old_hp="550" hp="302"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="41" name="激光" batter="0" grade="11" organism_attr="7"/>
+        </skills>
+      </item>
+      <item attack="210">
+        <assailant type="assailant" id="3"/>
+		<defender>
+        <item id="1" old_hp="338" hp="0"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="422" name="雷电" batter="0" grade="22" organism_attr="10"/>
+        </skills>
+      </item>
+      <item attack="240">
+        <assailant type="assailant" id="4"/>
+		<defender>
+        <item id="3" old_hp="302" hp="62"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="531" name="冰墙" batter="0" grade="11" organism_attr="11"/>
+        </skills>
+      </item>
+      <item attack="150">
+        <assailant type="assailant" id="5"/>
+		<defender>
+        <item id="3" old_hp="440" hp="215"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="401" name="雷弹" batter="0" grade="1" organism_attr="4"/>
+        </skills>
+      </item>
+      <item attack="160">
+        <assailant type="assailant" id="6"/>
+		<defender>
+        <item id="3" old_hp="62" hp="0"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="483" name="水弹" batter="0" grade="1" organism_attr="5"/>
+        </skills>
+      </item>
+
+
+      <item attack="150">
+        <assailant type="defender" id="2"/>
+		<defender>
+        <item id="5" old_hp="20000" hp="18200"/>
+        </defender>
+        <skills/>
+      </item>
+      <item attack="140">
+        <assailant type="defender" id="4"/>
+		<defender>
+        <item id="5" old_hp="12000" hp="5500"/>
+        </defender>
+        <skills/>
+      </item>
+      <item attack="160">
+        <assailant type="defender" id="5"/>
+		<defender>
+        <item id="5" old_hp="18200" hp="14600"/>
+        </defender>
+        <skills/>
+      </item>
+      <item attack="250">
+        <assailant type="defender" id="6"/>
+		<defender>
+        <item id="6" old_hp="14600" hp="11400"/>
+        </defender>
+        <skills/>
+      </item>
+
+
+      <item attack="75">
+        <assailant type="assailant" id="1"/>
+		<defender>
+        <item id="2" old_hp="8175" hp="6825"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="1" name="光弹" batter="0" grade="1" organism_attr="1"/>
+        </skills>
+      </item>
+      <item attack="165">
+        <assailant type="assailant" id="2"/>
+		<defender>
+        <item id="2" old_hp="4000" hp="2150"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="41" name="激光" batter="0" grade="11" organism_attr="7"/>
+        </skills>
+      </item>
+      <item attack="200">
+        <assailant type="assailant" id="3"/>
+		<defender>
+        <item id="2" old_hp="6825" hp="1425"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="422" name="雷电" batter="0" grade="22" organism_attr="10"/>
+        </skills>
+      </item>
+      <item attack="240">
+        <assailant type="assailant" id="4"/>
+		<defender>
+        <item id="5" old_hp="1425" hp="0"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="531" name="冰墙" batter="0" grade="11" organism_attr="11"/>
+        </skills>
+      </item>
+      <item attack="200">
+        <assailant type="assailant" id="6"/>
+		<defender>
+        <item id="5" old_hp="7150" hp="1720"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="483" name="水弹" batter="0" grade="1" organism_attr="5"/>
+        </skills>
+      </item>
+
+
+      <item attack="350">
+        <assailant type="defender" id="4"/>
+		<defender>
+        <item id="6" old_hp="6000" hp="4200"/>
+        </defender>
+        <skills/>
+      </item>
+      <item attack="200">
+        <assailant type="defender" id="6"/>
+		<defender>
+        <item id="6" old_hp="11400" hp="7800"/>
+        </defender>
+        <skills/>
+      </item>
+
+
+      <item attack="75">
+        <assailant type="assailant" id="1"/>
+		<defender>
+        <item id="4" old_hp="2075" hp="725"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="1" name="光弹" batter="0" grade="1" organism_attr="1"/>
+        </skills>
+      </item>
+      <item attack="165">
+        <assailant type="assailant" id="2"/>
+		<defender>
+        <item id="4" old_hp="725" hp="0"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="41" name="激光" batter="0" grade="11" organism_attr="7"/>
+        </skills>
+      </item>
+      <item attack="210">
+        <assailant type="assailant" id="4"/>
+		<defender>
+        <item id="6" old_hp="1425" hp="0"/>
+        </defender>
+        <skills>
+          <item user="assailant" id="531" name="冰墙" batter="0" grade="11" organism_attr="11"/>
+        </skills>
+      </item>
+    </process>
+  </fight>
+</root>
