@@ -1,5 +1,6 @@
 package com.oxgames.rufflewrapper;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.AssetManager;
 import android.net.Uri;
@@ -39,6 +40,8 @@ final class CookieProfileManager {
         this.context = context.getApplicationContext();
     }
 
+    @SuppressLint("SdCardPath")
+    @SuppressWarnings("deprecation")
     File getRootDirectory() {
         return new File(Environment.getExternalStorageDirectory(), OUTPUT_DIR_NAME);
     }
@@ -149,11 +152,28 @@ final class CookieProfileManager {
     }
 
     static String buildTargetUrl(CookieProfile profile) {
-        String domain = profile.userDomain;
-        if (!domain.startsWith("http://") && !domain.startsWith("https://")) {
-            domain = "http://" + domain;
+        return Uri.parse(buildRootUrl(profile)).buildUpon().encodedPath(TARGET_PATH).build().toString();
+    }
+
+    static String buildRootUrl(CookieProfile profile) {
+        return normalizeRootUrl(profile == null ? null : profile.userDomain);
+    }
+
+    static String buildRootUrl(Uri uri) {
+        if (uri == null || TextUtils.isEmpty(uri.getEncodedAuthority())) {
+            return null;
         }
-        return Uri.parse(domain).buildUpon().encodedPath(TARGET_PATH).build().toString();
+        return new Uri.Builder()
+                .scheme(TextUtils.isEmpty(uri.getScheme()) ? "http" : uri.getScheme())
+                .encodedAuthority(uri.getEncodedAuthority())
+                .build()
+                .toString()
+                .replaceAll("/$", "");
+    }
+
+    static boolean isDutyRewardEligibleBaseUrl(String baseUrl) {
+        return !TextUtils.isEmpty(baseUrl)
+                && !baseUrl.trim().toLowerCase(java.util.Locale.US).contains("pvzol.org");
     }
 
     static boolean isSupportedSavePage(Uri uri) {
@@ -273,6 +293,26 @@ final class CookieProfileManager {
             return null;
         }
         return "http://" + authority;
+    }
+
+    private static String normalizeRootUrl(String value) {
+        if (TextUtils.isEmpty(value)) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+            normalized = "http://" + normalized;
+        }
+        Uri uri = Uri.parse(normalized);
+        if (TextUtils.isEmpty(uri.getEncodedAuthority())) {
+            return null;
+        }
+        return new Uri.Builder()
+                .scheme(TextUtils.isEmpty(uri.getScheme()) ? "http" : uri.getScheme())
+                .encodedAuthority(uri.getEncodedAuthority())
+                .build()
+                .toString()
+                .replaceAll("/$", "");
     }
 
     static boolean isLegacyYoukiaLandingPage(Uri uri) {

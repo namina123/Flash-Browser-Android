@@ -2,10 +2,17 @@ package com.oxgames.rufflewrapper;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.activity.OnBackPressedCallback;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.net.http.SslError;
@@ -13,10 +20,12 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.FileObserver;
 import android.os.Message;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
 import android.util.Patterns;
+import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -26,6 +35,8 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
@@ -56,7 +67,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -67,6 +80,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "RuffleWrapper";
@@ -74,6 +88,12 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREFS_NAME = "browser_prefs";
     private static final String PREF_ORIENTATION = "orientation_mode";
     private static final String PREF_RUFFLE_FONT_MODE = "ruffle_font_mode";
+    private static final String PREF_PANEL_CONCURRENCY = "panel_concurrency";
+    private static final String PREF_PANEL_REQUEST_INTERVAL = "panel_request_interval";
+    private static final String PREF_PANEL_SELECTED_COOKIE_KEYS = "panel_selected_cookie_keys";
+    private static final String PREF_PANEL_SELECT_CURRENT_PAGE_COOKIE = "panel_select_current_page_cookie";
+    private static final String PREF_PANEL_TASK_DAILY_DUTY = "panel_task_daily_duty";
+    private static final String PREF_PANEL_REPOSITORY_RECORDS = "panel_repository_records";
     private static final String IE_USER_AGENT =
             "Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; Trident/6.0)";
     private static final String IE_ACCEPT =
@@ -92,6 +112,10 @@ public class MainActivity extends AppCompatActivity {
     private static final int MENU_MANUAL_TEST_PROXY = 106;
     private static final int MENU_RUFFLE_DEBUG_DUMP = 107;
     private static final int MENU_NAV_PVZ_YOUKIA = 108;
+    private static final int FEATURE_PANEL_TAB_COOKIE = 0;
+    private static final int FEATURE_PANEL_TAB_BASIC = 1;
+    private static final int FEATURE_PANEL_TAB_REPOSITORY = 2;
+    private static final int FEATURE_PANEL_TAB_LOG = 3;
     private static final int FONT_MODE_CHINESE_SANS = 0;
     private static final int FONT_MODE_CHINESE_SERIF = 1;
     private static final int FONT_MODE_EMBEDDED = 2;
@@ -161,23 +185,90 @@ public class MainActivity extends AppCompatActivity {
     private FrameLayout fullscreenContainer;
     private ImageButton fullscreenRotateButton;
     private ImageButton fullscreenExitButton;
+    private ImageButton fullscreenFeaturePanelButton;
+    private Button legacyYoukiaRedirectButton;
     private View customView;
     private WebChromeClient.CustomViewCallback customViewCallback;
-    private int originalSystemUiVisibility;
     private boolean inAppRuffleFullscreen;
+    private int topBarBasePaddingLeft;
+    private int topBarBasePaddingTop;
+    private int topBarBasePaddingRight;
+    private int topBarBasePaddingBottom;
+    private int browserChromeBasePaddingLeft;
+    private int browserChromeBasePaddingTop;
+    private int browserChromeBasePaddingRight;
+    private int browserChromeBasePaddingBottom;
+    private int fullscreenRotateBaseTopMargin;
+    private int fullscreenRotateBaseRightMargin;
+    private int fullscreenExitBaseTopMargin;
+    private int fullscreenExitBaseRightMargin;
     private ScaleGestureDetector scaleGestureDetector;
     private float touchHoldMoveTolerancePx;
     private float gestureAnchorX;
     private float gestureAnchorY;
     private boolean simulatedHoverActive;
     private boolean consumeTouchUntilGestureEnd;
+    private boolean hoverModeArmedForClick;
+    private boolean hoverEnteredByHold;
+    private boolean flashTouchBridgeAvailable;
+    private boolean syntheticMouseHoverActive;
     private SharedPreferences preferences;
     private LocalMappingManager localMappingManager;
     private CookieProfileManager cookieProfileManager;
+    private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
+    private String pendingLegacyYoukiaSourceUrl;
+    private String pendingLegacyYoukiaTargetUrl;
+    private AlertDialog featurePanelDialog;
+    private Button featurePanelTabCookieButton;
+    private Button featurePanelTabBasicButton;
+    private Button featurePanelTabRepositoryButton;
+    private Button featurePanelTabLogButton;
+    private View featurePanelCookiePage;
+    private View featurePanelBasicPage;
+    private View featurePanelRepositoryPage;
+    private View featurePanelLogPage;
+    private LinearLayout featurePanelCookieContainer;
+    private TextView featurePanelCookieHintText;
+    private Button featurePanelSelectAllCookiesButton;
+    private EditText featurePanelConcurrencyInput;
+    private EditText featurePanelRequestIntervalInput;
+    private Button featurePanelPauseResumeButton;
+    private Button featurePanelCancelButton;
+    private CheckBox featurePanelDailyDutyCheckBox;
+    private Button featurePanelDailyDutyRunButton;
+    private Button featurePanelStartSelectedButton;
+    private Button featurePanelStorageAccessButton;
+    private TextView featurePanelRepositoryHintText;
+    private TextView featurePanelRepositorySelectedTargetsText;
+    private Button featurePanelRepositoryPickTargetsButton;
+    private TextView featurePanelRepositoryViewCookieText;
+    private Button featurePanelRepositoryPickViewCookieButton;
+    private Button featurePanelRepositoryRefreshButton;
+    private Button featurePanelRepositoryRecordButton;
+    private Button featurePanelRepositoryCompareButton;
+    private Button featurePanelRepositoryIgnoreSelectedButton;
+    private Button featurePanelRepositoryRemoveIgnoredButton;
+    private LinearLayout featurePanelRepositoryCurrentContainer;
+    private LinearLayout featurePanelRepositoryDeltaContainer;
+    private LinearLayout featurePanelRepositoryIgnoredContainer;
+    private TextView featurePanelQueueStatusText;
+    private TextView featurePanelQueueLogText;
+    private final ArrayList<FeatureCookieChoice> featureCookieChoices = new ArrayList<>();
+    private final java.util.LinkedHashSet<String> sessionRepositoryRecordChoiceKeys = new java.util.LinkedHashSet<>();
+    private final java.util.HashMap<String, WarehouseRecordManager.RepositorySnapshot> featureRepositoryCurrentSnapshots = new java.util.HashMap<>();
+    private final java.util.HashMap<String, java.util.LinkedHashSet<Integer>> featureRepositorySelectedDeltaIds = new java.util.HashMap<>();
+    private final java.util.HashMap<String, java.util.LinkedHashSet<Integer>> featureRepositorySelectedIgnoredIds = new java.util.HashMap<>();
+    private WarehouseRecordManager warehouseRecordManager;
+    private String sessionRepositoryViewChoiceKey;
+    private boolean sessionRepositoryRecordSelectionInitialized;
+    private boolean featureRepositoryCurrentExpanded;
     private final Runnable hoverHoldRunnable = () -> {
-        if (dispatchTouchBridgeCall("hoverAt", gestureAnchorX, gestureAnchorY)) {
+        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", true);
+        if (dispatchSyntheticMouseHover(gestureAnchorX, gestureAnchorY, true)) {
             simulatedHoverActive = true;
             consumeTouchUntilGestureEnd = true;
+            hoverModeArmedForClick = true;
+            hoverEnteredByHold = true;
         }
     };
     private final Runnable menuHoldRunnable = () -> {
@@ -188,16 +279,25 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED);
         preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         applySavedOrientation();
         setContentView(R.layout.activity_main);
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                MainActivity.this.handleBackNavigation();
+            }
+        });
 
         localMappingManager = new LocalMappingManager(this);
         localMappingManager.initialize();
         cookieProfileManager = new CookieProfileManager(this);
+        warehouseRecordManager = new WarehouseRecordManager(this);
         cookieProfileManager.ensureInitialized();
+        dutyRequestQueue.setListener(snapshot -> runOnUiThread(() -> renderFeaturePanelQueueState(snapshot)));
 
         wrapper = findViewById(R.id.web_view);
         urlInput = findViewById(R.id.input_url);
@@ -207,6 +307,10 @@ public class MainActivity extends AppCompatActivity {
         fullscreenContainer = findViewById(R.id.fullscreen_container);
         fullscreenRotateButton = findViewById(R.id.btn_rotate_fullscreen);
         fullscreenExitButton = findViewById(R.id.btn_exit_fullscreen);
+        fullscreenFeaturePanelButton = findViewById(R.id.btn_feature_panel_fullscreen);
+        legacyYoukiaRedirectButton = findViewById(R.id.btn_legacy_youkia_redirect);
+        captureInsetAwareBaseValues();
+        installWindowInsetHandlers();
         touchHoldMoveTolerancePx = getResources().getDisplayMetrics().density * TOUCH_HOLD_MOVE_TOLERANCE_DP;
         wrapper.setHapticFeedbackEnabled(false);
         wrapper.setOnLongClickListener(v -> true);
@@ -243,9 +347,11 @@ public class MainActivity extends AppCompatActivity {
         });
 
         findViewById(R.id.btn_refresh).setOnClickListener(v -> wrapper.reload());
-        findViewById(R.id.btn_go).setOnClickListener(v -> loadFromInput());
+        findViewById(R.id.btn_go).setOnClickListener(v -> showFeaturePanelDialog());
         findViewById(R.id.btn_fullscreen).setOnClickListener(v -> toggleRuffleFullscreenCompat());
         findViewById(R.id.btn_save_cookie).setOnClickListener(v -> saveCurrentCookieProfile());
+        fullscreenFeaturePanelButton.setOnClickListener(v -> toggleFeaturePanelDialog());
+        legacyYoukiaRedirectButton.setOnClickListener(v -> performPendingLegacyYoukiaRedirect());
         fullscreenRotateButton.setOnClickListener(v -> rotateFullscreenOrientation());
         fullscreenExitButton.setOnClickListener(v -> {
             if (customView != null) {
@@ -276,7 +382,108 @@ public class MainActivity extends AppCompatActivity {
             loadUrl(DEFAULT_URL);
         }
         wrapper.setOnTouchListener((v, event) -> handleWebViewTouch(event));
-        Log.i(TAG, "Local mapping config: " + localMappingManager.getConfigFile().getAbsolutePath());
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (featurePanelDialog != null && featurePanelDialog.isShowing()) {
+            refreshFeaturePanelCookieChoices();
+            renderFeaturePanelQueueState(dutyRequestQueue.snapshot());
+        }
+    }
+
+    private void captureInsetAwareBaseValues() {
+        if (topBar != null) {
+            topBarBasePaddingLeft = topBar.getPaddingLeft();
+            topBarBasePaddingTop = topBar.getPaddingTop();
+            topBarBasePaddingRight = topBar.getPaddingRight();
+            topBarBasePaddingBottom = topBar.getPaddingBottom();
+        }
+        if (browserChrome != null) {
+            browserChromeBasePaddingLeft = browserChrome.getPaddingLeft();
+            browserChromeBasePaddingTop = browserChrome.getPaddingTop();
+            browserChromeBasePaddingRight = browserChrome.getPaddingRight();
+            browserChromeBasePaddingBottom = browserChrome.getPaddingBottom();
+        }
+        if (fullscreenRotateButton != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenRotateButton.getLayoutParams();
+            fullscreenRotateBaseTopMargin = params.topMargin;
+            fullscreenRotateBaseRightMargin = params.rightMargin;
+        }
+        if (fullscreenExitButton != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenExitButton.getLayoutParams();
+            fullscreenExitBaseTopMargin = params.topMargin;
+            fullscreenExitBaseRightMargin = params.rightMargin;
+        }
+    }
+
+    private void installWindowInsetHandlers() {
+        View root = findViewById(android.R.id.content);
+        if (root == null) {
+            return;
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            boolean fullscreenActive = customView != null || inAppRuffleFullscreen;
+
+            if (browserChrome != null) {
+                int left = fullscreenActive ? 0 : browserChromeBasePaddingLeft + systemBars.left;
+                int top = fullscreenActive ? 0 : browserChromeBasePaddingTop;
+                int right = fullscreenActive ? 0 : browserChromeBasePaddingRight + systemBars.right;
+                int bottom = fullscreenActive ? 0 : browserChromeBasePaddingBottom + systemBars.bottom;
+                browserChrome.setPadding(left, top, right, bottom);
+            }
+            if (topBar != null) {
+                topBar.setPadding(
+                        topBarBasePaddingLeft + systemBars.left,
+                        topBarBasePaddingTop + systemBars.top,
+                        topBarBasePaddingRight + systemBars.right,
+                        topBarBasePaddingBottom
+                );
+            }
+            applyFullscreenButtonInsets(systemBars);
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(root);
+    }
+
+    private void applyFullscreenButtonInsets(Insets systemBars) {
+        if (fullscreenRotateButton != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenRotateButton.getLayoutParams();
+            params.topMargin = fullscreenRotateBaseTopMargin + systemBars.top;
+            params.rightMargin = fullscreenRotateBaseRightMargin + systemBars.right;
+            fullscreenRotateButton.setLayoutParams(params);
+        }
+        if (fullscreenExitButton != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenExitButton.getLayoutParams();
+            params.topMargin = fullscreenExitBaseTopMargin + systemBars.top;
+            params.rightMargin = fullscreenExitBaseRightMargin + systemBars.right;
+            fullscreenExitButton.setLayoutParams(params);
+        }
+    }
+
+    private void requestInsetRefresh() {
+        View root = findViewById(android.R.id.content);
+        if (root != null) {
+            ViewCompat.requestApplyInsets(root);
+        }
+    }
+
+    private void setSystemBarsHidden(boolean hidden) {
+        WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        if (controller == null) {
+            return;
+        }
+        if (hidden) {
+            controller.setSystemBarsBehavior(
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            );
+            controller.hide(WindowInsetsCompat.Type.systemBars());
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars());
+        }
     }
 
     private void setupWebView() {
@@ -365,24 +572,15 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                if (request != null && request.isForMainFrame()) {
-                    String redirectedUrl = rewriteSpecialYoukiaUrl(request.getUrl() == null
-                            ? null
-                            : request.getUrl().toString());
-                    if (!TextUtils.isEmpty(redirectedUrl)
-                            && request.getUrl() != null
-                            && !redirectedUrl.equals(request.getUrl().toString())) {
-                        copyCookiesForRedirect(request.getUrl().toString(), redirectedUrl);
-                        view.loadUrl(redirectedUrl);
-                        return true;
-                    }
-                }
                 return false;
             }
 
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
+                resetFullscreenStateForNavigation();
+                hideLegacyYoukiaRedirectPrompt();
+                flashTouchBridgeAvailable = false;
                 progressBar.setVisibility(View.VISIBLE);
                 updateUrlInput(url);
             }
@@ -390,6 +588,10 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                ensureFullscreenStateMatchesPage();
+                refreshFlashTouchBridgeAvailability();
+                wrapper.postDelayed(MainActivity.this::refreshFlashTouchBridgeAvailability, 600L);
+                updateLegacyYoukiaRedirectPrompt(url);
                 updateUrlInput(url);
                 if (progressBar.getProgress() >= 100) {
                     progressBar.setVisibility(View.GONE);
@@ -434,8 +636,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
-                Log.d(TAG, consoleMessage.message() + " @" + consoleMessage.sourceId() + ":" + consoleMessage.lineNumber());
-                return true;
+                return false;
             }
 
             @Override
@@ -450,14 +651,12 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public boolean onJsAlert(WebView view, String url, String message, JsResult result) {
-                Log.d(TAG, "JS alert: " + message);
                 result.cancel();
                 return true;
             }
 
             @Override
             public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
-                Log.d(TAG, "JS confirm blocked: " + message);
                 result.cancel();
                 return true;
             }
@@ -470,7 +669,6 @@ public class MainActivity extends AppCompatActivity {
                     String defaultValue,
                     android.webkit.JsPromptResult result
             ) {
-                Log.d(TAG, "JS prompt blocked: " + message);
                 result.cancel();
                 return true;
             }
@@ -482,7 +680,6 @@ public class MainActivity extends AppCompatActivity {
                     boolean isUserGesture,
                     Message resultMsg
             ) {
-                Log.d(TAG, "Window creation requested: " + resultMsg);
                 return false;
             }
         });
@@ -502,11 +699,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadUrl(String url) {
-        String redirectedUrl = rewriteSpecialYoukiaUrl(url);
-        if (!TextUtils.isEmpty(redirectedUrl) && !redirectedUrl.equals(url)) {
-            copyCookiesForRedirect(url, redirectedUrl);
-            url = redirectedUrl;
-        }
         wrapper.loadUrl(url);
     }
 
@@ -530,26 +722,59 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private String rewriteSpecialYoukiaUrl(String rawUrl) {
+    private void updateLegacyYoukiaRedirectPrompt(String currentUrl) {
+        String targetUrl = resolveSpecialYoukiaRedirectTarget(currentUrl);
+        if (TextUtils.isEmpty(targetUrl) || TextUtils.equals(currentUrl, targetUrl)) {
+            hideLegacyYoukiaRedirectPrompt();
+            return;
+        }
+
+        pendingLegacyYoukiaSourceUrl = currentUrl;
+        pendingLegacyYoukiaTargetUrl = targetUrl;
+        if (legacyYoukiaRedirectButton != null) {
+            legacyYoukiaRedirectButton.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void hideLegacyYoukiaRedirectPrompt() {
+        pendingLegacyYoukiaSourceUrl = null;
+        pendingLegacyYoukiaTargetUrl = null;
+        if (legacyYoukiaRedirectButton != null) {
+            legacyYoukiaRedirectButton.setVisibility(View.GONE);
+        }
+    }
+
+    private void performPendingLegacyYoukiaRedirect() {
+        String sourceUrl = pendingLegacyYoukiaSourceUrl;
+        String targetUrl = pendingLegacyYoukiaTargetUrl;
+        hideLegacyYoukiaRedirectPrompt();
+        if (TextUtils.isEmpty(sourceUrl) || TextUtils.isEmpty(targetUrl)) {
+            return;
+        }
+        copyCookiesForRedirect(sourceUrl, targetUrl);
+        wrapper.loadUrl(targetUrl);
+    }
+
+    private String resolveSpecialYoukiaRedirectTarget(String rawUrl) {
         if (TextUtils.isEmpty(rawUrl)) {
-            return rawUrl;
+            return null;
         }
 
         try {
             Uri uri = Uri.parse(rawUrl);
             if (!CookieProfileManager.isLegacyYoukiaLandingPage(uri)) {
-                return rawUrl;
+                return null;
             }
 
             String subdomain = CookieProfileManager.extractLegacyYoukiaSubdomain(uri);
             if (TextUtils.isEmpty(subdomain)) {
-                return rawUrl;
+                return null;
             }
 
             return "http://" + subdomain + ".youkia.pvz.youkia.com/pvz/index.php/default/main";
         } catch (Exception e) {
             Log.e(TAG, "Failed to rewrite youkia url: " + rawUrl, e);
-            return rawUrl;
+            return null;
         }
     }
 
@@ -695,7 +920,6 @@ public class MainActivity extends AppCompatActivity {
         html.append("function setStatus(message){");
         html.append("var node=document.getElementById('status');");
         html.append("if(node){node.textContent='Status: '+message;}");
-        html.append("console.log('[manual-ruffle] '+message);");
         html.append("}");
         html.append("function boot(){");
         html.append("try{");
@@ -757,7 +981,7 @@ public class MainActivity extends AppCompatActivity {
                         "ua:navigator.userAgent" +
                         "});" +
                         "})();";
-        wrapper.evaluateJavascript(script, value -> Log.d(TAG, "Render capabilities: " + value));
+        wrapper.evaluateJavascript(script, value -> { });
     }
 
     private void scheduleRuffleDebugDump() {
@@ -812,7 +1036,6 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(this, decoded, Toast.LENGTH_SHORT).show();
                 }
             }
-            Log.d(TAG, "Ruffle debug dump:\n" + decoded);
             if (callback != null) {
                 callback.onDump(decoded);
             }
@@ -1019,7 +1242,6 @@ public class MainActivity extends AppCompatActivity {
         }
 
         inAppRuffleFullscreen = true;
-        originalSystemUiVisibility = getWindow().getDecorView().getSystemUiVisibility();
 
         if (topBar != null) {
             topBar.setVisibility(View.GONE);
@@ -1033,16 +1255,12 @@ public class MainActivity extends AppCompatActivity {
         if (fullscreenExitButton != null) {
             fullscreenExitButton.setVisibility(View.VISIBLE);
         }
+        if (fullscreenFeaturePanelButton != null) {
+            fullscreenFeaturePanelButton.setVisibility(View.VISIBLE);
+        }
 
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        );
+        setSystemBarsHidden(true);
+        requestInsetRefresh();
     }
 
     private void exitInAppRuffleFullscreenMode() {
@@ -1064,10 +1282,41 @@ public class MainActivity extends AppCompatActivity {
         if (fullscreenExitButton != null) {
             fullscreenExitButton.setVisibility(View.GONE);
         }
+        if (fullscreenFeaturePanelButton != null) {
+            fullscreenFeaturePanelButton.setVisibility(View.GONE);
+        }
 
-        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        getWindow().getDecorView().setSystemUiVisibility(originalSystemUiVisibility);
+        setSystemBarsHidden(false);
         applySavedOrientation();
+        requestInsetRefresh();
+    }
+
+    private void resetFullscreenStateForNavigation() {
+        if (customView != null) {
+            hideFullscreenContent();
+        }
+        if (inAppRuffleFullscreen) {
+            exitInAppRuffleFullscreenMode();
+        }
+    }
+
+    private void ensureFullscreenStateMatchesPage() {
+        if (!inAppRuffleFullscreen || wrapper == null) {
+            return;
+        }
+        String script =
+                "(function(){" +
+                        "var state=window.__androidRuffleFullscreen||null;" +
+                        "var target=document.querySelector('ruffle-player, ruffle-embed, ruffle-object');" +
+                        "if(!target){target=document.querySelector('embed[type*=shockwave], object[type*=shockwave], embed[src*=\\\".swf\\\"], object[data*=\\\".swf\\\"]');}" +
+                        "return !!(state&&state.active&&state.target&&target);" +
+                        "})();";
+        wrapper.evaluateJavascript(script, value -> {
+            boolean stillFullscreen = "true".equalsIgnoreCase(value == null ? "" : value.replace("\"", ""));
+            if (!stillFullscreen && inAppRuffleFullscreen) {
+                exitInAppRuffleFullscreenMode();
+            }
+        });
     }
 
     private void hideKeyboard() {
@@ -1082,21 +1331,37 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
 
+        if (isSyntheticMouseEvent(event)) {
+            return false;
+        }
+
         scaleGestureDetector.onTouchEvent(event);
         boolean shouldConsume = scaleGestureDetector.isInProgress() || consumeTouchUntilGestureEnd;
 
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 cancelPendingTouchGestures();
+                dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
                 simulatedHoverActive = false;
                 consumeTouchUntilGestureEnd = false;
+                hoverModeArmedForClick = false;
+                hoverEnteredByHold = false;
+                syntheticMouseHoverActive = false;
                 gestureAnchorX = event.getX();
                 gestureAnchorY = event.getY();
                 wrapper.postDelayed(hoverHoldRunnable, HOVER_HOLD_MS);
                 break;
             case MotionEvent.ACTION_POINTER_DOWN:
                 cancelPendingTouchGestures();
-                if (!simulatedHoverActive && event.getPointerCount() >= 2) {
+                if (simulatedHoverActive) {
+                    dispatchSyntheticMouseExit(event.getX(), event.getY());
+                    dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
+                    simulatedHoverActive = false;
+                    hoverModeArmedForClick = false;
+                    hoverEnteredByHold = false;
+                    syntheticMouseHoverActive = false;
+                }
+                if (event.getPointerCount() >= 2) {
                     gestureAnchorX = averageTouchX(event);
                     gestureAnchorY = averageTouchY(event);
                     wrapper.postDelayed(menuHoldRunnable, MENU_HOLD_MS);
@@ -1107,37 +1372,80 @@ public class MainActivity extends AppCompatActivity {
                 if (scaleGestureDetector.isInProgress()) {
                     cancelPendingTouchGestures();
                     if (simulatedHoverActive) {
-                        dispatchTouchBridgeSimpleCall("leaveHover");
+                        dispatchSyntheticMouseExit(event.getX(), event.getY());
+                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
                         simulatedHoverActive = false;
+                        syntheticMouseHoverActive = false;
                     }
+                    hoverModeArmedForClick = false;
+                    hoverEnteredByHold = false;
                     shouldConsume = true;
                     break;
                 }
 
                 if (simulatedHoverActive && event.getPointerCount() == 1) {
-                    dispatchTouchBridgeCall("hoverAt", event.getX(), event.getY());
+                    dispatchSyntheticMouseHover(event.getX(), event.getY(), false);
+                    hoverModeArmedForClick = true;
                     shouldConsume = true;
                     break;
                 }
 
                 if (movedBeyondTouchTolerance(event)) {
                     cancelPendingTouchGestures();
+                    if (event.getPointerCount() == 1 && !simulatedHoverActive) {
+                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", true);
+                        dispatchSyntheticMouseHover(event.getX(), event.getY(), true);
+                        simulatedHoverActive = true;
+                        consumeTouchUntilGestureEnd = true;
+                        hoverModeArmedForClick = true;
+                        hoverEnteredByHold = false;
+                        syntheticMouseHoverActive = true;
+                        shouldConsume = true;
+                    }
                 }
                 shouldConsume = shouldConsume || event.getPointerCount() >= 2;
                 break;
             case MotionEvent.ACTION_POINTER_UP:
                 cancelPendingTouchGestures();
+                hoverModeArmedForClick = false;
+                hoverEnteredByHold = false;
                 shouldConsume = true;
                 break;
             case MotionEvent.ACTION_UP:
+                cancelPendingTouchGestures();
+                if (simulatedHoverActive) {
+                    if (hoverModeArmedForClick && !hoverEnteredByHold) {
+                        dispatchSyntheticMouseHover(event.getX(), event.getY(), false);
+                        dispatchSyntheticMouseClick(event.getX(), event.getY());
+                        dispatchSyntheticMouseExit(event.getX(), event.getY());
+                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
+                        simulatedHoverActive = false;
+                    } else if (!hoverEnteredByHold) {
+                        dispatchSyntheticMouseExit(event.getX(), event.getY());
+                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
+                        simulatedHoverActive = false;
+                    } else {
+                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
+                    }
+                }
+                shouldConsume = shouldConsume || consumeTouchUntilGestureEnd || hoverModeArmedForClick;
+                consumeTouchUntilGestureEnd = false;
+                hoverModeArmedForClick = false;
+                hoverEnteredByHold = false;
+                syntheticMouseHoverActive = false;
+                break;
             case MotionEvent.ACTION_CANCEL:
                 cancelPendingTouchGestures();
                 if (simulatedHoverActive) {
-                    dispatchTouchBridgeSimpleCall("leaveHover");
+                    dispatchSyntheticMouseExit(event.getX(), event.getY());
+                    dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
                     simulatedHoverActive = false;
+                    syntheticMouseHoverActive = false;
                 }
                 shouldConsume = shouldConsume || consumeTouchUntilGestureEnd;
                 consumeTouchUntilGestureEnd = false;
+                hoverModeArmedForClick = false;
+                hoverEnteredByHold = false;
                 break;
             default:
                 shouldConsume = shouldConsume || event.getPointerCount() >= 2;
@@ -1153,6 +1461,166 @@ public class MainActivity extends AppCompatActivity {
         }
         wrapper.removeCallbacks(hoverHoldRunnable);
         wrapper.removeCallbacks(menuHoldRunnable);
+    }
+
+    private boolean isSyntheticMouseEvent(MotionEvent event) {
+        if (event == null || event.getPointerCount() <= 0) {
+            return false;
+        }
+        return ((event.getSource() & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE)
+                || event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE;
+    }
+
+    private boolean dispatchSyntheticMouseHover(float x, float y, boolean entering) {
+        if (wrapper == null) {
+            return false;
+        }
+        long now = SystemClock.uptimeMillis();
+        if (entering || !syntheticMouseHoverActive) {
+            MotionEvent enterEvent = obtainMouseMotionEvent(
+                    now,
+                    now,
+                    MotionEvent.ACTION_HOVER_ENTER,
+                    x,
+                    y,
+                    0
+            );
+            wrapper.dispatchGenericMotionEvent(enterEvent);
+            enterEvent.recycle();
+            syntheticMouseHoverActive = true;
+        }
+
+        MotionEvent hoverEvent = obtainMouseMotionEvent(
+                now,
+                now,
+                MotionEvent.ACTION_HOVER_MOVE,
+                x,
+                y,
+                0
+        );
+        wrapper.dispatchGenericMotionEvent(hoverEvent);
+        hoverEvent.recycle();
+        return true;
+    }
+
+    private boolean dispatchSyntheticMouseClick(float x, float y) {
+        if (wrapper == null) {
+            return false;
+        }
+        long downTime = SystemClock.uptimeMillis();
+        long upTime = downTime + 16L;
+
+        MotionEvent downEvent = obtainMouseMotionEvent(
+                downTime,
+                downTime,
+                MotionEvent.ACTION_DOWN,
+                x,
+                y,
+                MotionEvent.BUTTON_PRIMARY
+        );
+        wrapper.dispatchTouchEvent(downEvent);
+        downEvent.recycle();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            MotionEvent buttonPressEvent = obtainMouseMotionEvent(
+                    downTime,
+                    downTime,
+                    MotionEvent.ACTION_BUTTON_PRESS,
+                    x,
+                    y,
+                    MotionEvent.BUTTON_PRIMARY
+            );
+            wrapper.dispatchGenericMotionEvent(buttonPressEvent);
+            buttonPressEvent.recycle();
+        }
+
+        MotionEvent upEvent = obtainMouseMotionEvent(
+                downTime,
+                upTime,
+                MotionEvent.ACTION_UP,
+                x,
+                y,
+                0
+        );
+        wrapper.dispatchTouchEvent(upEvent);
+        upEvent.recycle();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            MotionEvent buttonReleaseEvent = obtainMouseMotionEvent(
+                    downTime,
+                    upTime,
+                    MotionEvent.ACTION_BUTTON_RELEASE,
+                    x,
+                    y,
+                    MotionEvent.BUTTON_PRIMARY
+            );
+            wrapper.dispatchGenericMotionEvent(buttonReleaseEvent);
+            buttonReleaseEvent.recycle();
+        }
+        return true;
+    }
+
+    private boolean dispatchSyntheticMouseExit(float x, float y) {
+        if (wrapper == null || !syntheticMouseHoverActive) {
+            return false;
+        }
+        long now = SystemClock.uptimeMillis();
+        MotionEvent exitEvent = obtainMouseMotionEvent(
+                now,
+                now,
+                MotionEvent.ACTION_HOVER_EXIT,
+                x,
+                y,
+                0
+        );
+        wrapper.dispatchGenericMotionEvent(exitEvent);
+        exitEvent.recycle();
+        syntheticMouseHoverActive = false;
+        return true;
+    }
+
+    private MotionEvent obtainMouseMotionEvent(
+            long downTime,
+            long eventTime,
+            int action,
+            float x,
+            float y,
+            int buttonState
+    ) {
+        MotionEvent.PointerProperties pointerProperties = new MotionEvent.PointerProperties();
+        pointerProperties.id = 0;
+        pointerProperties.toolType = MotionEvent.TOOL_TYPE_MOUSE;
+
+        MotionEvent.PointerCoords pointerCoords = new MotionEvent.PointerCoords();
+        pointerCoords.x = x;
+        pointerCoords.y = y;
+        pointerCoords.pressure = buttonState == 0 ? 0f : 1f;
+        pointerCoords.size = 1f;
+
+        return MotionEvent.obtain(
+                downTime,
+                eventTime,
+                action,
+                1,
+                new MotionEvent.PointerProperties[]{pointerProperties},
+                new MotionEvent.PointerCoords[]{pointerCoords},
+                0,
+                buttonState,
+                1f,
+                1f,
+                0,
+                0,
+                InputDevice.SOURCE_MOUSE,
+                0
+        );
+    }
+
+    private boolean shouldDispatchTapClick(MotionEvent event) {
+        return flashTouchBridgeAvailable
+                && event != null
+                && event.getPointerCount() == 1
+                && !scaleGestureDetector.isInProgress()
+                && !movedBeyondTouchTolerance(event);
     }
 
     private boolean movedBeyondTouchTolerance(MotionEvent event) {
@@ -1190,7 +1658,7 @@ public class MainActivity extends AppCompatActivity {
         }
         String script = "(function(){var bridge=window.__ruffleWrapperTouchBridge;"
                 + "return !!(bridge&&bridge." + method + "&&bridge." + method + "(" + x + "," + y + "));})();";
-        wrapper.evaluateJavascript(script, null);
+        wrapper.evaluateJavascript(script, value -> { });
         return true;
     }
 
@@ -1200,8 +1668,38 @@ public class MainActivity extends AppCompatActivity {
         }
         String script = "(function(){var bridge=window.__ruffleWrapperTouchBridge;"
                 + "return !!(bridge&&bridge." + method + "&&bridge." + method + "());})();";
-        wrapper.evaluateJavascript(script, null);
+        wrapper.evaluateJavascript(script, value -> { });
         return true;
+    }
+
+    private boolean dispatchTouchBridgeBooleanCall(String method, boolean value) {
+        if (wrapper == null || TextUtils.isEmpty(method)) {
+            return false;
+        }
+        String script = "(function(){var bridge=window.__ruffleWrapperTouchBridge;"
+                + "return !!(bridge&&bridge." + method + "&&bridge." + method + "(" + value + "));})();";
+        wrapper.evaluateJavascript(script, result -> { });
+        return true;
+    }
+
+    private void refreshFlashTouchBridgeAvailability() {
+        if (wrapper == null) {
+            flashTouchBridgeAvailable = false;
+            return;
+        }
+
+        String script =
+                "(function(){"
+                        + "return !!document.querySelector("
+                        + "'ruffle-player,ruffle-embed,ruffle-object,"
+                        + "embed[type*=\\\"shockwave\\\"],object[type*=\\\"shockwave\\\"],"
+                        + "embed[src*=\\\".swf\\\"],object[data*=\\\".swf\\\"]'"
+                        + ");"
+                        + "})();";
+        wrapper.evaluateJavascript(script, value -> {
+            String normalized = value == null ? "" : value.replace("\"", "").trim();
+            flashTouchBridgeAvailable = "true".equalsIgnoreCase(normalized);
+        });
     }
 
     private void saveCurrentCookieProfile() {
@@ -1379,6 +1877,1250 @@ public class MainActivity extends AppCompatActivity {
         Toast.makeText(this, R.string.cookie_applied, Toast.LENGTH_SHORT).show();
     }
 
+    private void showFeaturePanelDialog() {
+        if (featurePanelDialog != null && featurePanelDialog.isShowing()) {
+            return;
+        }
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_feature_panel, null);
+        featurePanelTabCookieButton = dialogView.findViewById(R.id.btn_panel_tab_cookie);
+        featurePanelTabBasicButton = dialogView.findViewById(R.id.btn_panel_tab_basic);
+        featurePanelTabRepositoryButton = dialogView.findViewById(R.id.btn_panel_tab_repository);
+        featurePanelTabLogButton = dialogView.findViewById(R.id.btn_panel_tab_log);
+        featurePanelCookiePage = dialogView.findViewById(R.id.panel_page_cookie);
+        featurePanelBasicPage = dialogView.findViewById(R.id.panel_page_basic);
+        featurePanelRepositoryPage = dialogView.findViewById(R.id.panel_page_repository);
+        featurePanelLogPage = dialogView.findViewById(R.id.panel_page_log);
+        featurePanelCookieContainer = dialogView.findViewById(R.id.panel_cookie_container);
+        featurePanelCookieHintText = dialogView.findViewById(R.id.text_cookie_selection_hint);
+        featurePanelSelectAllCookiesButton = dialogView.findViewById(R.id.btn_panel_select_all_cookies);
+        featurePanelConcurrencyInput = dialogView.findViewById(R.id.input_panel_concurrency);
+        featurePanelRequestIntervalInput = dialogView.findViewById(R.id.input_panel_request_interval);
+        featurePanelPauseResumeButton = dialogView.findViewById(R.id.btn_panel_pause_resume);
+        featurePanelCancelButton = dialogView.findViewById(R.id.btn_panel_cancel);
+        featurePanelDailyDutyCheckBox = dialogView.findViewById(R.id.check_panel_daily_duty);
+        featurePanelDailyDutyRunButton = dialogView.findViewById(R.id.btn_panel_daily_duty_run);
+        featurePanelStartSelectedButton = dialogView.findViewById(R.id.btn_panel_start_selected);
+        featurePanelStorageAccessButton = dialogView.findViewById(R.id.btn_panel_request_storage_access);
+        featurePanelRepositoryHintText = dialogView.findViewById(R.id.text_panel_repository_hint);
+        featurePanelRepositorySelectedTargetsText = dialogView.findViewById(R.id.text_panel_repository_selected_targets);
+        featurePanelRepositoryPickTargetsButton = dialogView.findViewById(R.id.btn_panel_repository_pick_targets);
+        featurePanelRepositoryViewCookieText = dialogView.findViewById(R.id.text_panel_repository_view_cookie);
+        featurePanelRepositoryPickViewCookieButton = dialogView.findViewById(R.id.btn_panel_repository_pick_view_cookie);
+        featurePanelRepositoryRefreshButton = dialogView.findViewById(R.id.btn_panel_repository_refresh);
+        featurePanelRepositoryRecordButton = dialogView.findViewById(R.id.btn_panel_repository_record);
+        featurePanelRepositoryCompareButton = dialogView.findViewById(R.id.btn_panel_repository_compare);
+        featurePanelRepositoryIgnoreSelectedButton = dialogView.findViewById(R.id.btn_panel_repository_ignore_selected);
+        featurePanelRepositoryRemoveIgnoredButton = dialogView.findViewById(R.id.btn_panel_repository_remove_ignored);
+        featurePanelRepositoryCurrentContainer = dialogView.findViewById(R.id.panel_repository_current_container);
+        featurePanelRepositoryDeltaContainer = dialogView.findViewById(R.id.panel_repository_delta_container);
+        featurePanelRepositoryIgnoredContainer = dialogView.findViewById(R.id.panel_repository_ignored_container);
+        featurePanelQueueStatusText = dialogView.findViewById(R.id.text_panel_queue_status);
+        featurePanelQueueLogText = dialogView.findViewById(R.id.text_panel_queue_log);
+
+        featurePanelConcurrencyInput.setText(String.valueOf(getSavedPanelConcurrency()));
+        featurePanelRequestIntervalInput.setText(String.valueOf(getSavedPanelRequestInterval()));
+        featurePanelDailyDutyCheckBox.setChecked(preferences.getBoolean(PREF_PANEL_TASK_DAILY_DUTY, false));
+        featurePanelDailyDutyCheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferences.edit().putBoolean(PREF_PANEL_TASK_DAILY_DUTY, isChecked).apply());
+        featurePanelTabCookieButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_COOKIE));
+        featurePanelTabBasicButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_BASIC));
+        featurePanelTabRepositoryButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_REPOSITORY));
+        featurePanelTabLogButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_LOG));
+        featurePanelSelectAllCookiesButton.setOnClickListener(v -> selectAllFeaturePanelCookies());
+        featurePanelRepositoryPickTargetsButton.setOnClickListener(v -> showRepositoryTargetPickerDialogV2());
+        featurePanelRepositoryPickViewCookieButton.setOnClickListener(v -> showRepositoryViewPickerDialogV2());
+        featurePanelRepositoryRefreshButton.setOnClickListener(v -> refreshRepositoryForSelectedTargets());
+        featurePanelRepositoryRecordButton.setOnClickListener(v -> recordRepositoryForSelectedTargets());
+        featurePanelRepositoryCompareButton.setOnClickListener(v -> compareRepositoryForSelectedTargets());
+        featurePanelRepositoryIgnoreSelectedButton.setOnClickListener(v -> addSelectedRepositoryDeltasToIgnored());
+        featurePanelRepositoryRemoveIgnoredButton.setOnClickListener(v -> removeSelectedRepositoryIgnoredItems());
+        featurePanelPauseResumeButton.setOnClickListener(v -> {
+            DutyRequestQueue.StateSnapshot snapshot = dutyRequestQueue.snapshot();
+            if (snapshot.running && !snapshot.paused) {
+                dutyRequestQueue.pause();
+            } else if (snapshot.running) {
+                dutyRequestQueue.resume();
+            }
+        });
+        featurePanelCancelButton.setOnClickListener(v -> dutyRequestQueue.cancel());
+        featurePanelDailyDutyRunButton.setOnClickListener(v -> startDailyDutyRequestsFromPanel(false));
+        featurePanelStartSelectedButton.setOnClickListener(v -> startDailyDutyRequestsFromPanel(true));
+        featurePanelStorageAccessButton.setOnClickListener(v -> requestAllFilesAccessPermission());
+
+        featurePanelDialog = new AlertDialog.Builder(this)
+                .setTitle("功能面板")
+                .setView(dialogView)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        featurePanelDialog.setOnDismissListener(dialog -> clearFeaturePanelReferences());
+        featurePanelDialog.show();
+        if (featurePanelDialog.getWindow() != null) {
+            int width = Math.min((int) (getResources().getDisplayMetrics().widthPixels * 0.94f), dpToPx(920));
+            int height = (int) (getResources().getDisplayMetrics().heightPixels * 0.88f);
+            featurePanelDialog.getWindow().setLayout(width, height);
+        }
+
+        refreshFeaturePanelCookieChoices();
+        refreshRepositorySelectionState();
+        renderRepositoryPanelV2();
+        switchFeaturePanelTab(FEATURE_PANEL_TAB_COOKIE);
+        renderFeaturePanelQueueState(dutyRequestQueue.snapshot());
+    }
+
+    private void toggleFeaturePanelDialog() {
+        if (featurePanelDialog != null && featurePanelDialog.isShowing()) {
+            featurePanelDialog.dismiss();
+            return;
+        }
+        showFeaturePanelDialog();
+    }
+
+    private void clearFeaturePanelReferences() {
+        featurePanelDialog = null;
+        featurePanelTabCookieButton = null;
+        featurePanelTabBasicButton = null;
+        featurePanelTabRepositoryButton = null;
+        featurePanelTabLogButton = null;
+        featurePanelCookiePage = null;
+        featurePanelBasicPage = null;
+        featurePanelRepositoryPage = null;
+        featurePanelLogPage = null;
+        featurePanelCookieContainer = null;
+        featurePanelCookieHintText = null;
+        featurePanelSelectAllCookiesButton = null;
+        featurePanelConcurrencyInput = null;
+        featurePanelRequestIntervalInput = null;
+        featurePanelPauseResumeButton = null;
+        featurePanelCancelButton = null;
+        featurePanelDailyDutyCheckBox = null;
+        featurePanelDailyDutyRunButton = null;
+        featurePanelStartSelectedButton = null;
+        featurePanelStorageAccessButton = null;
+        featurePanelRepositoryHintText = null;
+        featurePanelRepositorySelectedTargetsText = null;
+        featurePanelRepositoryPickTargetsButton = null;
+        featurePanelRepositoryViewCookieText = null;
+        featurePanelRepositoryPickViewCookieButton = null;
+        featurePanelRepositoryRefreshButton = null;
+        featurePanelRepositoryRecordButton = null;
+        featurePanelRepositoryCompareButton = null;
+        featurePanelRepositoryIgnoreSelectedButton = null;
+        featurePanelRepositoryRemoveIgnoredButton = null;
+        featurePanelRepositoryCurrentContainer = null;
+        featurePanelRepositoryDeltaContainer = null;
+        featurePanelRepositoryIgnoredContainer = null;
+        featurePanelQueueStatusText = null;
+        featurePanelQueueLogText = null;
+        featureCookieChoices.clear();
+    }
+
+    private void refreshFeaturePanelCookieChoices() {
+        if (featurePanelCookieContainer == null) {
+            return;
+        }
+
+        featureCookieChoices.clear();
+        FeatureCookieChoice currentPageChoice = buildCurrentPageFeatureCookieChoice();
+        if (currentPageChoice != null) {
+            featureCookieChoices.add(currentPageChoice);
+        }
+
+        boolean hasStorageAccess = cookieProfileManager.canAccessRootDirectory() && cookieProfileManager.ensureInitialized();
+        if (hasStorageAccess) {
+            List<CookieProfileManager.CookieProfile> profiles = cookieProfileManager.loadProfiles();
+            for (CookieProfileManager.CookieProfile profile : profiles) {
+                FeatureCookieChoice choice = new FeatureCookieChoice();
+                choice.label = profile.userName + " (" + profile.file.getName() + ")";
+                choice.pageUrl = CookieProfileManager.buildTargetUrl(profile);
+                choice.subtitle = choice.pageUrl;
+                choice.baseUrl = CookieProfileManager.buildRootUrl(profile);
+                choice.cookies = profile.userCookies;
+                choice.selectionKey = profile.file.getAbsolutePath();
+                choice.selected = isPersistedCookieChoiceSelected(choice.selectionKey);
+                choice.currentPage = false;
+                featureCookieChoices.add(choice);
+            }
+        }
+
+        featurePanelCookieContainer.removeAllViews();
+        if (featureCookieChoices.isEmpty()) {
+            TextView emptyView = new TextView(this);
+            emptyView.setText("当前没有可选 Cookie。");
+            emptyView.setTextColor(0xFF4B5563);
+            featurePanelCookieContainer.addView(emptyView);
+        } else {
+            LayoutInflater inflater = LayoutInflater.from(this);
+            for (FeatureCookieChoice choice : featureCookieChoices) {
+                View itemView = inflater.inflate(R.layout.item_panel_cookie_option, featurePanelCookieContainer, false);
+                CheckBox checkBox = itemView.findViewById(R.id.check_cookie_option);
+                TextView subtitle = itemView.findViewById(R.id.text_cookie_option_subtitle);
+                checkBox.setText(choice.currentPage ? "当前页面 Cookie" : choice.label);
+                checkBox.setChecked(choice.selected);
+                checkBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                    choice.selected = isChecked;
+                    persistFeatureCookieChoiceSelection(choice, isChecked);
+                });
+
+                StringBuilder subtitleBuilder = new StringBuilder();
+                if (!choice.currentPage) {
+                    subtitleBuilder.append(choice.label).append('\n');
+                }
+                subtitleBuilder.append(choice.subtitle == null ? "" : choice.subtitle);
+                if (!TextUtils.isEmpty(choice.baseUrl)) {
+                    subtitleBuilder.append("\nAMF: ").append(choice.baseUrl).append("/pvz/amf/");
+                }
+                if (!CookieProfileManager.isDutyRewardEligibleBaseUrl(choice.pageUrl)) {
+                    subtitleBuilder.append("\n该项不会用于每日任务（URL 包含 pvzol.org）");
+                }
+                subtitle.setText(subtitleBuilder.toString().trim());
+                featurePanelCookieContainer.addView(itemView);
+            }
+        }
+
+        if (featurePanelStorageAccessButton != null) {
+            featurePanelStorageAccessButton.setVisibility(hasStorageAccess ? View.GONE : View.VISIBLE);
+        }
+        if (featurePanelCookieHintText != null && !hasStorageAccess) {
+            featurePanelCookieHintText.setText("将优先显示当前页面 Cookie。未授权时只能使用当前页面 Cookie。每日任务会自动忽略地址包含 pvzol.org 的选项。");
+        }
+    }
+
+    private void onFeaturePanelCookieChoicesChanged() {
+        refreshRepositorySelectionState();
+        renderRepositoryPanelV2();
+    }
+
+    private void selectAllFeaturePanelCookies() {
+        if (featureCookieChoices.isEmpty()) {
+            return;
+        }
+        for (FeatureCookieChoice choice : featureCookieChoices) {
+            choice.selected = true;
+            persistFeatureCookieChoiceSelection(choice, true);
+        }
+        refreshFeaturePanelCookieChoices();
+    }
+
+    private void refreshRepositorySelectionState() {
+        List<FeatureCookieChoice> availableChoices = getAvailableRepositoryChoices();
+        java.util.LinkedHashSet<String> availableKeys = new java.util.LinkedHashSet<>();
+        for (FeatureCookieChoice choice : availableChoices) {
+            availableKeys.add(getRepositoryChoiceKey(choice));
+        }
+        sessionRepositoryRecordChoiceKeys.retainAll(availableKeys);
+        if (!sessionRepositoryRecordSelectionInitialized) {
+            sessionRepositoryRecordSelectionInitialized = true;
+            for (FeatureCookieChoice choice : availableChoices) {
+                if (choice.currentPage) {
+                    sessionRepositoryRecordChoiceKeys.add(getRepositoryChoiceKey(choice));
+                    break;
+                }
+            }
+            if (sessionRepositoryRecordChoiceKeys.isEmpty() && !availableChoices.isEmpty()) {
+                sessionRepositoryRecordChoiceKeys.add(getRepositoryChoiceKey(availableChoices.get(0)));
+            }
+        }
+
+        if (TextUtils.isEmpty(sessionRepositoryViewChoiceKey)
+                || !sessionRepositoryRecordChoiceKeys.contains(sessionRepositoryViewChoiceKey)) {
+            sessionRepositoryViewChoiceKey = sessionRepositoryRecordChoiceKeys.isEmpty()
+                    ? null
+                    : sessionRepositoryRecordChoiceKeys.iterator().next();
+        }
+    }
+
+    private List<FeatureCookieChoice> getAvailableRepositoryChoices() {
+        return new ArrayList<>(featureCookieChoices);
+    }
+
+    private String getRepositoryChoiceKey(FeatureCookieChoice choice) {
+        if (choice == null) {
+            return "";
+        }
+        if (!TextUtils.isEmpty(choice.selectionKey)) {
+            return "profile:" + choice.selectionKey;
+        }
+        return "current:" + choice.baseUrl + ":" + Integer.toHexString(String.valueOf(choice.cookies).hashCode());
+    }
+
+    private FeatureCookieChoice findRepositoryChoiceByKey(String key) {
+        if (TextUtils.isEmpty(key)) {
+            return null;
+        }
+        for (FeatureCookieChoice choice : featureCookieChoices) {
+            if (key.equals(getRepositoryChoiceKey(choice))) {
+                return choice;
+            }
+        }
+        return null;
+    }
+
+    private List<FeatureCookieChoice> getSelectedRepositoryChoices() {
+        ArrayList<FeatureCookieChoice> result = new ArrayList<>();
+        for (FeatureCookieChoice choice : featureCookieChoices) {
+            if (sessionRepositoryRecordChoiceKeys.contains(getRepositoryChoiceKey(choice))) {
+                result.add(choice);
+            }
+        }
+        return result;
+    }
+
+    private FeatureCookieChoice getViewedRepositoryChoice() {
+        return findRepositoryChoiceByKey(sessionRepositoryViewChoiceKey);
+    }
+
+    private void showRepositoryTargetPickerDialog() {
+        List<FeatureCookieChoice> availableChoices = getAvailableRepositoryChoices();
+        if (availableChoices.isEmpty()) {
+            Toast.makeText(this, "No cookie available.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] labels = new String[availableChoices.size()];
+        boolean[] checked = new boolean[availableChoices.size()];
+        for (int i = 0; i < availableChoices.size(); i += 1) {
+            FeatureCookieChoice choice = availableChoices.get(i);
+            labels[i] = choice.currentPage ? "当前页面 Cookie" : choice.label;
+            checked[i] = sessionRepositoryRecordChoiceKeys.contains(getRepositoryChoiceKey(choice));
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("选择记录 Cookie")
+                .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) -> {
+                    String key = getRepositoryChoiceKey(availableChoices.get(which));
+                    if (isChecked) {
+                        sessionRepositoryRecordChoiceKeys.add(key);
+                    } else {
+                        sessionRepositoryRecordChoiceKeys.remove(key);
+                    }
+                })
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    refreshRepositorySelectionState();
+                    renderRepositoryPanel();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void showRepositoryViewPickerDialog() {
+        List<FeatureCookieChoice> selectedChoices = getSelectedRepositoryChoices();
+        if (selectedChoices.isEmpty()) {
+            Toast.makeText(this, "Please select record cookies first.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] labels = new String[selectedChoices.size()];
+        int checkedIndex = 0;
+        for (int i = 0; i < selectedChoices.size(); i += 1) {
+            FeatureCookieChoice choice = selectedChoices.get(i);
+            labels[i] = choice.currentPage ? "当前页面 Cookie" : choice.label;
+            if (TextUtils.equals(sessionRepositoryViewChoiceKey, getRepositoryChoiceKey(choice))) {
+                checkedIndex = i;
+            }
+        }
+
+        final int[] selectedIndex = new int[] {checkedIndex};
+        new AlertDialog.Builder(this)
+                .setTitle("选择查看 Cookie")
+                .setSingleChoiceItems(labels, checkedIndex, (dialog, which) -> selectedIndex[0] = which)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    sessionRepositoryViewChoiceKey = getRepositoryChoiceKey(selectedChoices.get(selectedIndex[0]));
+                    renderRepositoryPanel();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void renderRepositoryPanel() {
+        if (featurePanelRepositorySelectedTargetsText == null
+                || featurePanelRepositoryViewCookieText == null
+                || featurePanelRepositoryCurrentContainer == null
+                || featurePanelRepositoryDeltaContainer == null
+                || featurePanelRepositoryIgnoredContainer == null) {
+            return;
+        }
+
+        refreshRepositorySelectionState();
+        List<FeatureCookieChoice> selectedChoices = getSelectedRepositoryChoices();
+        if (selectedChoices.isEmpty()) {
+            featurePanelRepositorySelectedTargetsText.setText("当前未选择记录目标");
+            featurePanelRepositoryViewCookieText.setText("当前未选择查看目标");
+            renderRepositoryMessage(featurePanelRepositoryCurrentContainer, "请选择记录 Cookie。");
+            renderRepositoryMessage(featurePanelRepositoryDeltaContainer, "暂无对比结果。");
+            renderRepositoryMessage(featurePanelRepositoryIgnoredContainer, "暂无屏蔽物品。");
+            updateRepositoryButtonsEnabled(false);
+            return;
+        }
+
+        ArrayList<String> labels = new ArrayList<>();
+        for (FeatureCookieChoice choice : selectedChoices) {
+            labels.add(choice.currentPage ? "当前页面 Cookie" : choice.label);
+        }
+        featurePanelRepositorySelectedTargetsText.setText("记录目标：" + TextUtils.join("，", labels));
+
+        FeatureCookieChoice viewedChoice = getViewedRepositoryChoice();
+        if (viewedChoice == null) {
+            viewedChoice = selectedChoices.get(0);
+            sessionRepositoryViewChoiceKey = getRepositoryChoiceKey(viewedChoice);
+        }
+        featurePanelRepositoryViewCookieText.setText("当前查看：" + (viewedChoice.currentPage ? "当前页面 Cookie" : viewedChoice.label));
+        updateRepositoryButtonsEnabled(true);
+        renderRepositoryChoiceData(viewedChoice);
+    }
+
+    private void updateRepositoryButtonsEnabled(boolean enabled) {
+        if (featurePanelRepositoryPickViewCookieButton != null) {
+            featurePanelRepositoryPickViewCookieButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryRefreshButton != null) {
+            featurePanelRepositoryRefreshButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryRecordButton != null) {
+            featurePanelRepositoryRecordButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryCompareButton != null) {
+            featurePanelRepositoryCompareButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryIgnoreSelectedButton != null) {
+            featurePanelRepositoryIgnoreSelectedButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryRemoveIgnoredButton != null) {
+            featurePanelRepositoryRemoveIgnoredButton.setEnabled(enabled);
+        }
+    }
+
+    private void renderRepositoryChoiceData(FeatureCookieChoice choice) {
+        String key = getRepositoryChoiceKey(choice);
+        WarehouseRecordManager.RepositorySnapshot currentSnapshot = featureRepositoryCurrentSnapshots.get(key);
+        if (currentSnapshot == null) {
+            renderRepositoryMessage(featurePanelRepositoryCurrentContainer, "尚未刷新当前仓库。");
+        } else {
+            renderRepositoryCurrentSnapshot(currentSnapshot);
+        }
+
+        WarehouseRecordManager.RepositorySnapshot recordedSnapshot = loadRepositoryRecordedSnapshot(key);
+        java.util.LinkedHashSet<Integer> ignoredIds = loadRepositoryIgnoredIds(key);
+        if (recordedSnapshot == null || currentSnapshot == null) {
+            renderRepositoryMessage(featurePanelRepositoryDeltaContainer, "请先刷新仓库并设置记录点。");
+        } else {
+            renderRepositoryDeltas(key, warehouseRecordManager.compare(currentSnapshot, recordedSnapshot, ignoredIds));
+        }
+        renderRepositoryIgnoredList(key, ignoredIds);
+    }
+
+    private void renderRepositoryCurrentSnapshot(WarehouseRecordManager.RepositorySnapshot snapshot) {
+        featurePanelRepositoryCurrentContainer.removeAllViews();
+        if (snapshot == null || snapshot.toolEntries.isEmpty()) {
+            renderRepositoryMessage(featurePanelRepositoryCurrentContainer, "当前仓库为空。");
+            return;
+        }
+        TextView textView = new TextView(this);
+        StringBuilder builder = new StringBuilder();
+        for (WarehouseRecordManager.ToolEntry entry : snapshot.toolEntries) {
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(entry.displayName).append(" x ").append(entry.amount);
+        }
+        textView.setText(builder.toString());
+        textView.setTextColor(0xFF1F2937);
+        textView.setBackgroundColor(0xFFFFFFFF);
+        textView.setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12));
+        featurePanelRepositoryCurrentContainer.addView(textView);
+    }
+
+    private void renderRepositoryDeltas(String key, List<WarehouseRecordManager.RepositoryDelta> deltas) {
+        featurePanelRepositoryDeltaContainer.removeAllViews();
+        java.util.LinkedHashSet<Integer> selectedIds = featureRepositorySelectedDeltaIds.get(key);
+        if (selectedIds == null) {
+            selectedIds = new java.util.LinkedHashSet<>();
+            featureRepositorySelectedDeltaIds.put(key, selectedIds);
+        }
+        if (deltas == null || deltas.isEmpty()) {
+            renderRepositoryMessage(featurePanelRepositoryDeltaContainer, "暂无变化。");
+            return;
+        }
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (WarehouseRecordManager.RepositoryDelta delta : deltas) {
+            View itemView = inflater.inflate(R.layout.item_panel_cookie_option, featurePanelRepositoryDeltaContainer, false);
+            CheckBox checkBox = itemView.findViewById(R.id.check_cookie_option);
+            TextView subtitle = itemView.findViewById(R.id.text_cookie_option_subtitle);
+            checkBox.setText(delta.displayName);
+            checkBox.setChecked(selectedIds.contains(Integer.valueOf(delta.toolId)));
+            checkBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                java.util.LinkedHashSet<Integer> ids = featureRepositorySelectedDeltaIds.get(key);
+                if (ids == null) {
+                    ids = new java.util.LinkedHashSet<>();
+                    featureRepositorySelectedDeltaIds.put(key, ids);
+                }
+                if (isChecked) {
+                    ids.add(Integer.valueOf(delta.toolId));
+                } else {
+                    ids.remove(Integer.valueOf(delta.toolId));
+                }
+            });
+            subtitle.setText("变化：" + delta.deltaAmount + "，当前数量：" + delta.currentAmount);
+            featurePanelRepositoryDeltaContainer.addView(itemView);
+        }
+    }
+
+    private void renderRepositoryIgnoredList(String key, java.util.LinkedHashSet<Integer> ignoredIds) {
+        featurePanelRepositoryIgnoredContainer.removeAllViews();
+        java.util.LinkedHashSet<Integer> selectedIds = featureRepositorySelectedIgnoredIds.get(key);
+        if (selectedIds == null) {
+            selectedIds = new java.util.LinkedHashSet<>();
+            featureRepositorySelectedIgnoredIds.put(key, selectedIds);
+        }
+        if (ignoredIds == null || ignoredIds.isEmpty()) {
+            renderRepositoryMessage(featurePanelRepositoryIgnoredContainer, "暂无屏蔽物品。");
+            return;
+        }
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (Integer toolId : ignoredIds) {
+            View itemView = inflater.inflate(R.layout.item_panel_cookie_option, featurePanelRepositoryIgnoredContainer, false);
+            CheckBox checkBox = itemView.findViewById(R.id.check_cookie_option);
+            TextView subtitle = itemView.findViewById(R.id.text_cookie_option_subtitle);
+            checkBox.setText(warehouseRecordManager.nameOf(toolId.intValue()));
+            checkBox.setChecked(selectedIds.contains(toolId));
+            checkBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                java.util.LinkedHashSet<Integer> ids = featureRepositorySelectedIgnoredIds.get(key);
+                if (ids == null) {
+                    ids = new java.util.LinkedHashSet<>();
+                    featureRepositorySelectedIgnoredIds.put(key, ids);
+                }
+                if (isChecked) {
+                    ids.add(toolId);
+                } else {
+                    ids.remove(toolId);
+                }
+            });
+            subtitle.setText("Tool ID: " + toolId);
+            featurePanelRepositoryIgnoredContainer.addView(itemView);
+        }
+    }
+
+    private void renderRepositoryMessage(LinearLayout container, String message) {
+        container.removeAllViews();
+        TextView textView = new TextView(this);
+        textView.setText(message);
+        textView.setTextColor(0xFF4B5563);
+        textView.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8));
+        container.addView(textView);
+    }
+
+    private void showRepositoryTargetPickerDialogV2() {
+        List<FeatureCookieChoice> availableChoices = getAvailableRepositoryChoices();
+        if (availableChoices.isEmpty()) {
+            Toast.makeText(this, "当前没有可用的 Cookie。", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] labels = new String[availableChoices.size()];
+        boolean[] checked = new boolean[availableChoices.size()];
+        for (int i = 0; i < availableChoices.size(); i += 1) {
+            FeatureCookieChoice choice = availableChoices.get(i);
+            labels[i] = getRepositoryChoiceLabelV2(choice);
+            checked[i] = sessionRepositoryRecordChoiceKeys.contains(getRepositoryChoiceKey(choice));
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("选择记录 Cookie")
+                .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) -> {
+                    String key = getRepositoryChoiceKey(availableChoices.get(which));
+                    if (isChecked) {
+                        sessionRepositoryRecordChoiceKeys.add(key);
+                    } else {
+                        sessionRepositoryRecordChoiceKeys.remove(key);
+                    }
+                })
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    refreshRepositorySelectionState();
+                    featureRepositoryCurrentExpanded = false;
+                    renderRepositoryPanelV2();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void showRepositoryViewPickerDialogV2() {
+        List<FeatureCookieChoice> selectedChoices = getSelectedRepositoryChoices();
+        if (selectedChoices.isEmpty()) {
+            Toast.makeText(this, "请先选择记录 Cookie。", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] labels = new String[selectedChoices.size()];
+        int checkedIndex = 0;
+        for (int i = 0; i < selectedChoices.size(); i += 1) {
+            FeatureCookieChoice choice = selectedChoices.get(i);
+            labels[i] = getRepositoryChoiceLabelV2(choice);
+            if (TextUtils.equals(sessionRepositoryViewChoiceKey, getRepositoryChoiceKey(choice))) {
+                checkedIndex = i;
+            }
+        }
+
+        final int[] selectedIndex = new int[] {checkedIndex};
+        new AlertDialog.Builder(this)
+                .setTitle("选择查看 Cookie")
+                .setSingleChoiceItems(labels, checkedIndex, (dialog, which) -> selectedIndex[0] = which)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    sessionRepositoryViewChoiceKey = getRepositoryChoiceKey(selectedChoices.get(selectedIndex[0]));
+                    featureRepositoryCurrentExpanded = false;
+                    renderRepositoryPanelV2();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private String getRepositoryChoiceLabelV2(FeatureCookieChoice choice) {
+        if (choice == null) {
+            return "";
+        }
+        return choice.currentPage ? "当前页面 Cookie" : choice.label;
+    }
+
+    private void renderRepositoryPanelV2() {
+        if (featurePanelRepositorySelectedTargetsText == null
+                || featurePanelRepositoryViewCookieText == null
+                || featurePanelRepositoryCurrentContainer == null
+                || featurePanelRepositoryDeltaContainer == null
+                || featurePanelRepositoryIgnoredContainer == null) {
+            return;
+        }
+
+        refreshRepositorySelectionState();
+        List<FeatureCookieChoice> selectedChoices = getSelectedRepositoryChoices();
+        if (selectedChoices.isEmpty()) {
+            featureRepositoryCurrentExpanded = false;
+            featurePanelRepositorySelectedTargetsText.setText("当前未选择记录目标");
+            featurePanelRepositoryViewCookieText.setText("当前未选择查看目标");
+            if (featurePanelRepositoryHintText != null) {
+                featurePanelRepositoryHintText.setText("仓库记录按 Cookie 分开保存。请先选择记录 Cookie。");
+            }
+            renderRepositoryMessage(featurePanelRepositoryCurrentContainer, "当前未选择记录目标");
+            renderRepositoryMessage(featurePanelRepositoryDeltaContainer, "当前未选择记录目标");
+            renderRepositoryMessage(featurePanelRepositoryIgnoredContainer, "当前未选择记录目标");
+            updateRepositoryButtonsEnabledV2(false);
+            return;
+        }
+
+        ArrayList<String> labels = new ArrayList<>();
+        for (FeatureCookieChoice choice : selectedChoices) {
+            labels.add(getRepositoryChoiceLabelV2(choice));
+        }
+        featurePanelRepositorySelectedTargetsText.setText("记录目标：" + TextUtils.join("，", labels));
+
+        FeatureCookieChoice viewedChoice = getViewedRepositoryChoice();
+        if (viewedChoice == null) {
+            viewedChoice = selectedChoices.get(0);
+            sessionRepositoryViewChoiceKey = getRepositoryChoiceKey(viewedChoice);
+        }
+        featurePanelRepositoryViewCookieText.setText("当前查看：" + getRepositoryChoiceLabelV2(viewedChoice));
+        if (featurePanelRepositoryHintText != null) {
+            featurePanelRepositoryHintText.setText("记录、对比和屏蔽都按各自 Cookie 分开保存。");
+        }
+        updateRepositoryButtonsEnabledV2(true);
+        renderRepositoryChoiceDataV2(viewedChoice);
+    }
+
+    private void updateRepositoryButtonsEnabledV2(boolean enabled) {
+        if (featurePanelRepositoryPickViewCookieButton != null) {
+            featurePanelRepositoryPickViewCookieButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryRefreshButton != null) {
+            featurePanelRepositoryRefreshButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryRecordButton != null) {
+            featurePanelRepositoryRecordButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryCompareButton != null) {
+            featurePanelRepositoryCompareButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryIgnoreSelectedButton != null) {
+            featurePanelRepositoryIgnoreSelectedButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryRemoveIgnoredButton != null) {
+            featurePanelRepositoryRemoveIgnoredButton.setEnabled(enabled);
+        }
+        setRepositoryContentEnabledV2(featurePanelRepositoryCurrentContainer, enabled);
+        setRepositoryContentEnabledV2(featurePanelRepositoryDeltaContainer, enabled);
+        setRepositoryContentEnabledV2(featurePanelRepositoryIgnoredContainer, enabled);
+    }
+
+    private void setRepositoryContentEnabledV2(View view, boolean enabled) {
+        if (view == null) {
+            return;
+        }
+        view.setEnabled(enabled);
+        view.setAlpha(enabled ? 1.0f : 0.42f);
+    }
+
+    private void renderRepositoryChoiceDataV2(FeatureCookieChoice choice) {
+        String key = getRepositoryChoiceKey(choice);
+        WarehouseRecordManager.RepositorySnapshot currentSnapshot = featureRepositoryCurrentSnapshots.get(key);
+        if (currentSnapshot == null) {
+            renderRepositoryMessage(featurePanelRepositoryCurrentContainer, "尚未刷新当前仓库。");
+        } else {
+            renderRepositoryCurrentSnapshotV2(currentSnapshot);
+        }
+
+        WarehouseRecordManager.RepositorySnapshot recordedSnapshot = loadRepositoryRecordedSnapshot(key);
+        java.util.LinkedHashSet<Integer> ignoredIds = loadRepositoryIgnoredIds(key);
+        if (recordedSnapshot == null || currentSnapshot == null) {
+            renderRepositoryMessage(featurePanelRepositoryDeltaContainer, "请先刷新仓库并至少记录一次。");
+        } else {
+            renderRepositoryDeltasV2(key, warehouseRecordManager.compare(currentSnapshot, recordedSnapshot, ignoredIds));
+        }
+        renderRepositoryIgnoredListV2(key, ignoredIds);
+    }
+
+    private void renderRepositoryCurrentSnapshotV2(WarehouseRecordManager.RepositorySnapshot snapshot) {
+        featurePanelRepositoryCurrentContainer.removeAllViews();
+        if (snapshot == null || snapshot.toolEntries.isEmpty()) {
+            renderRepositoryMessage(featurePanelRepositoryCurrentContainer, "当前仓库为空。");
+            return;
+        }
+
+        final int collapsedLineCount = 8;
+        String fullText = buildRepositorySnapshotTextV2(snapshot);
+        String[] lines = fullText.split("\n");
+        boolean canCollapse = lines.length > collapsedLineCount;
+        String shownText = fullText;
+        if (!featureRepositoryCurrentExpanded && canCollapse) {
+            shownText = TextUtils.join("\n", java.util.Arrays.asList(lines).subList(0, collapsedLineCount));
+        }
+
+        TextView textView = new TextView(this);
+        textView.setText(shownText);
+        textView.setTextColor(0xFF1F2937);
+        textView.setBackgroundColor(0xFFFFFFFF);
+        textView.setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12));
+        featurePanelRepositoryCurrentContainer.addView(textView);
+
+        if (canCollapse) {
+            Button toggleButton = new Button(this);
+            toggleButton.setAllCaps(false);
+            toggleButton.setText(featureRepositoryCurrentExpanded ? "收起" : "展开全部");
+            toggleButton.setOnClickListener(v -> {
+                featureRepositoryCurrentExpanded = !featureRepositoryCurrentExpanded;
+                renderRepositoryCurrentSnapshotV2(snapshot);
+            });
+            featurePanelRepositoryCurrentContainer.addView(toggleButton);
+        }
+    }
+
+    private String buildRepositorySnapshotTextV2(WarehouseRecordManager.RepositorySnapshot snapshot) {
+        StringBuilder builder = new StringBuilder();
+        for (WarehouseRecordManager.ToolEntry entry : snapshot.toolEntries) {
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(entry.displayName).append(" x ").append(entry.amount);
+        }
+        return builder.toString();
+    }
+
+    private void renderRepositoryDeltasV2(String key, List<WarehouseRecordManager.RepositoryDelta> deltas) {
+        featurePanelRepositoryDeltaContainer.removeAllViews();
+        java.util.LinkedHashSet<Integer> selectedIds = featureRepositorySelectedDeltaIds.get(key);
+        if (selectedIds == null) {
+            selectedIds = new java.util.LinkedHashSet<>();
+            featureRepositorySelectedDeltaIds.put(key, selectedIds);
+        }
+        if (deltas == null || deltas.isEmpty()) {
+            renderRepositoryMessage(featurePanelRepositoryDeltaContainer, "暂无变化。");
+            return;
+        }
+
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (WarehouseRecordManager.RepositoryDelta delta : deltas) {
+            View itemView = inflater.inflate(R.layout.item_panel_cookie_option, featurePanelRepositoryDeltaContainer, false);
+            CheckBox checkBox = itemView.findViewById(R.id.check_cookie_option);
+            TextView subtitle = itemView.findViewById(R.id.text_cookie_option_subtitle);
+            checkBox.setText(delta.displayName);
+            checkBox.setChecked(selectedIds.contains(Integer.valueOf(delta.toolId)));
+            checkBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                java.util.LinkedHashSet<Integer> ids = featureRepositorySelectedDeltaIds.get(key);
+                if (ids == null) {
+                    ids = new java.util.LinkedHashSet<>();
+                    featureRepositorySelectedDeltaIds.put(key, ids);
+                }
+                if (isChecked) {
+                    ids.add(Integer.valueOf(delta.toolId));
+                } else {
+                    ids.remove(Integer.valueOf(delta.toolId));
+                }
+            });
+            subtitle.setText("变化：" + delta.deltaAmount + "，当前数量：" + delta.currentAmount);
+            featurePanelRepositoryDeltaContainer.addView(itemView);
+        }
+    }
+
+    private void renderRepositoryIgnoredListV2(String key, java.util.LinkedHashSet<Integer> ignoredIds) {
+        featurePanelRepositoryIgnoredContainer.removeAllViews();
+        java.util.LinkedHashSet<Integer> selectedIds = featureRepositorySelectedIgnoredIds.get(key);
+        if (selectedIds == null) {
+            selectedIds = new java.util.LinkedHashSet<>();
+            featureRepositorySelectedIgnoredIds.put(key, selectedIds);
+        }
+        if (ignoredIds == null || ignoredIds.isEmpty()) {
+            renderRepositoryMessage(featurePanelRepositoryIgnoredContainer, "暂无屏蔽物品。");
+            return;
+        }
+
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (Integer toolId : ignoredIds) {
+            View itemView = inflater.inflate(R.layout.item_panel_cookie_option, featurePanelRepositoryIgnoredContainer, false);
+            CheckBox checkBox = itemView.findViewById(R.id.check_cookie_option);
+            TextView subtitle = itemView.findViewById(R.id.text_cookie_option_subtitle);
+            checkBox.setText(warehouseRecordManager.nameOf(toolId.intValue()));
+            checkBox.setChecked(selectedIds.contains(toolId));
+            checkBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                java.util.LinkedHashSet<Integer> ids = featureRepositorySelectedIgnoredIds.get(key);
+                if (ids == null) {
+                    ids = new java.util.LinkedHashSet<>();
+                    featureRepositorySelectedIgnoredIds.put(key, ids);
+                }
+                if (isChecked) {
+                    ids.add(toolId);
+                } else {
+                    ids.remove(toolId);
+                }
+            });
+            subtitle.setText("物品 ID：" + toolId);
+            featurePanelRepositoryIgnoredContainer.addView(itemView);
+        }
+    }
+
+    private void refreshRepositoryForSelectedTargets() {
+        executeRepositoryBatchAction("refresh");
+    }
+
+    private void recordRepositoryForSelectedTargets() {
+        executeRepositoryBatchAction("record");
+    }
+
+    private void compareRepositoryForSelectedTargets() {
+        executeRepositoryBatchAction("compare");
+    }
+
+    private void executeRepositoryBatchAction(String action) {
+        List<FeatureCookieChoice> targets = getSelectedRepositoryChoices();
+        if (targets.isEmpty()) {
+            Toast.makeText(this, "请先选择记录 Cookie。", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        setRepositoryActionButtonsEnabled(false);
+        new Thread(() -> {
+            ArrayList<String> messages = new ArrayList<>();
+            for (FeatureCookieChoice choice : targets) {
+                String key = getRepositoryChoiceKey(choice);
+                String label = choice.currentPage ? "当前页面 Cookie" : choice.label;
+                try {
+                    WarehouseRecordManager.RepositorySnapshot snapshot =
+                            warehouseRecordManager.fetchRepository(choice.baseUrl, choice.cookies);
+                    featureRepositoryCurrentSnapshots.put(key, snapshot);
+                    if ("record".equals(action)) {
+                        saveRepositoryRecordedSnapshot(key, snapshot);
+                        messages.add(label + "：已记录");
+                    } else if ("compare".equals(action)) {
+                        messages.add(label + "：已对比");
+                    } else {
+                        messages.add(label + "：已刷新");
+                    }
+                } catch (Exception e) {
+                    messages.add(label + "：失败，" + e.getMessage());
+                }
+            }
+            runOnUiThread(() -> {
+                setRepositoryActionButtonsEnabled(true);
+                if (featurePanelRepositoryHintText != null && !messages.isEmpty()) {
+                    featurePanelRepositoryHintText.setText(TextUtils.join(" | ", messages));
+                }
+                renderRepositoryPanelV2();
+            });
+        }).start();
+    }
+
+    private void setRepositoryActionButtonsEnabled(boolean enabled) {
+        if (featurePanelRepositoryRefreshButton != null) {
+            featurePanelRepositoryRefreshButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryRecordButton != null) {
+            featurePanelRepositoryRecordButton.setEnabled(enabled);
+        }
+        if (featurePanelRepositoryCompareButton != null) {
+            featurePanelRepositoryCompareButton.setEnabled(enabled);
+        }
+    }
+
+    private void addSelectedRepositoryDeltasToIgnored() {
+        FeatureCookieChoice viewedChoice = getViewedRepositoryChoice();
+        if (viewedChoice == null) {
+            return;
+        }
+        String key = getRepositoryChoiceKey(viewedChoice);
+        java.util.LinkedHashSet<Integer> selectedIds = featureRepositorySelectedDeltaIds.get(key);
+        if (selectedIds == null || selectedIds.isEmpty()) {
+            return;
+        }
+        java.util.LinkedHashSet<Integer> ignoredIds = loadRepositoryIgnoredIds(key);
+        ignoredIds.addAll(selectedIds);
+        saveRepositoryIgnoredIds(key, ignoredIds);
+        selectedIds.clear();
+        renderRepositoryPanelV2();
+    }
+
+    private void removeSelectedRepositoryIgnoredItems() {
+        FeatureCookieChoice viewedChoice = getViewedRepositoryChoice();
+        if (viewedChoice == null) {
+            return;
+        }
+        String key = getRepositoryChoiceKey(viewedChoice);
+        java.util.LinkedHashSet<Integer> selectedIds = featureRepositorySelectedIgnoredIds.get(key);
+        if (selectedIds == null || selectedIds.isEmpty()) {
+            return;
+        }
+        java.util.LinkedHashSet<Integer> ignoredIds = loadRepositoryIgnoredIds(key);
+        ignoredIds.removeAll(selectedIds);
+        saveRepositoryIgnoredIds(key, ignoredIds);
+        selectedIds.clear();
+        renderRepositoryPanelV2();
+    }
+
+    private WarehouseRecordManager.RepositorySnapshot loadRepositoryRecordedSnapshot(String key) {
+        try {
+            JSONObject root = new JSONObject(preferences.getString(PREF_PANEL_REPOSITORY_RECORDS, "{}"));
+            JSONObject item = root.optJSONObject(key);
+            if (item == null) {
+                return null;
+            }
+            JSONObject snapshotObject = item.optJSONObject("snapshot");
+            if (snapshotObject == null) {
+                return null;
+            }
+            java.util.LinkedHashMap<Integer, Integer> toolAmounts = new java.util.LinkedHashMap<>();
+            java.util.Iterator<String> keys = snapshotObject.keys();
+            while (keys.hasNext()) {
+                String toolId = keys.next();
+                toolAmounts.put(Integer.valueOf(Integer.parseInt(toolId)), Integer.valueOf(snapshotObject.optInt(toolId, 0)));
+            }
+            ArrayList<WarehouseRecordManager.ToolEntry> entries = new ArrayList<>();
+            for (java.util.Map.Entry<Integer, Integer> entry : toolAmounts.entrySet()) {
+                entries.add(new WarehouseRecordManager.ToolEntry(
+                        entry.getKey().intValue(),
+                        entry.getValue().intValue(),
+                        warehouseRecordManager.nameOf(entry.getKey().intValue())
+                ));
+            }
+            return new WarehouseRecordManager.RepositorySnapshot(toolAmounts, entries);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void saveRepositoryRecordedSnapshot(String key, WarehouseRecordManager.RepositorySnapshot snapshot) {
+        if (TextUtils.isEmpty(key) || snapshot == null) {
+            return;
+        }
+        try {
+            JSONObject root = new JSONObject(preferences.getString(PREF_PANEL_REPOSITORY_RECORDS, "{}"));
+            JSONObject item = root.optJSONObject(key);
+            if (item == null) {
+                item = new JSONObject();
+                root.put(key, item);
+            }
+            JSONObject snapshotObject = new JSONObject();
+            for (java.util.Map.Entry<Integer, Integer> entry : snapshot.toolAmounts.entrySet()) {
+                snapshotObject.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            item.put("snapshot", snapshotObject);
+            if (!item.has("ignored")) {
+                item.put("ignored", new JSONArray());
+            }
+            preferences.edit().putString(PREF_PANEL_REPOSITORY_RECORDS, root.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private java.util.LinkedHashSet<Integer> loadRepositoryIgnoredIds(String key) {
+        java.util.LinkedHashSet<Integer> result = new java.util.LinkedHashSet<>();
+        try {
+            JSONObject root = new JSONObject(preferences.getString(PREF_PANEL_REPOSITORY_RECORDS, "{}"));
+            JSONObject item = root.optJSONObject(key);
+            if (item == null) {
+                return result;
+            }
+            JSONArray ignored = item.optJSONArray("ignored");
+            if (ignored == null) {
+                return result;
+            }
+            for (int i = 0; i < ignored.length(); i += 1) {
+                result.add(Integer.valueOf(ignored.optInt(i)));
+            }
+        } catch (Exception ignored) {
+        }
+        return result;
+    }
+
+    private void saveRepositoryIgnoredIds(String key, java.util.LinkedHashSet<Integer> ignoredIds) {
+        try {
+            JSONObject root = new JSONObject(preferences.getString(PREF_PANEL_REPOSITORY_RECORDS, "{}"));
+            JSONObject item = root.optJSONObject(key);
+            if (item == null) {
+                item = new JSONObject();
+                root.put(key, item);
+            }
+            JSONArray ignored = new JSONArray();
+            for (Integer toolId : ignoredIds) {
+                ignored.put(toolId);
+            }
+            item.put("ignored", ignored);
+            if (!item.has("snapshot")) {
+                item.put("snapshot", new JSONObject());
+            }
+            preferences.edit().putString(PREF_PANEL_REPOSITORY_RECORDS, root.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private FeatureCookieChoice buildCurrentPageFeatureCookieChoice() {
+        String currentUrl = wrapper == null ? null : wrapper.getUrl();
+        if (TextUtils.isEmpty(currentUrl)) {
+            return null;
+        }
+        Uri currentUri = Uri.parse(currentUrl);
+        if (!CookieProfileManager.isSupportedSavePage(currentUri)) {
+            return null;
+        }
+        String cookies = CookieManager.getInstance().getCookie(currentUrl);
+        String baseUrl = CookieProfileManager.buildRootUrl(currentUri);
+        if (TextUtils.isEmpty(cookies) || TextUtils.isEmpty(baseUrl)) {
+            return null;
+        }
+
+        FeatureCookieChoice choice = new FeatureCookieChoice();
+        choice.label = TextUtils.isEmpty(wrapper.getTitle()) ? currentUri.getHost() : wrapper.getTitle();
+        choice.pageUrl = currentUrl;
+        choice.subtitle = currentUrl;
+        choice.baseUrl = baseUrl;
+        choice.cookies = cookies;
+        choice.currentPage = true;
+        choice.selected = preferences.getBoolean(PREF_PANEL_SELECT_CURRENT_PAGE_COOKIE, true);
+        return choice;
+    }
+
+    private int getSavedPanelConcurrency() {
+        return Math.max(1, preferences.getInt(PREF_PANEL_CONCURRENCY, 1));
+    }
+
+    private void savePanelConcurrency(int concurrency) {
+        preferences.edit().putInt(PREF_PANEL_CONCURRENCY, Math.max(1, concurrency)).apply();
+    }
+
+    private int getSavedPanelRequestInterval() {
+        return Math.max(0, preferences.getInt(PREF_PANEL_REQUEST_INTERVAL, 700));
+    }
+
+    private void savePanelRequestInterval(int intervalMs) {
+        preferences.edit().putInt(PREF_PANEL_REQUEST_INTERVAL, Math.max(0, intervalMs)).apply();
+    }
+
+    private void switchFeaturePanelTab(int tab) {
+        if (featurePanelCookiePage != null) {
+            featurePanelCookiePage.setVisibility(tab == FEATURE_PANEL_TAB_COOKIE ? View.VISIBLE : View.GONE);
+        }
+        if (featurePanelBasicPage != null) {
+            featurePanelBasicPage.setVisibility(tab == FEATURE_PANEL_TAB_BASIC ? View.VISIBLE : View.GONE);
+        }
+        if (featurePanelRepositoryPage != null) {
+            featurePanelRepositoryPage.setVisibility(tab == FEATURE_PANEL_TAB_REPOSITORY ? View.VISIBLE : View.GONE);
+        }
+        if (featurePanelLogPage != null) {
+            featurePanelLogPage.setVisibility(tab == FEATURE_PANEL_TAB_LOG ? View.VISIBLE : View.GONE);
+        }
+        updateFeaturePanelTabButtonState(featurePanelTabCookieButton, tab == FEATURE_PANEL_TAB_COOKIE);
+        updateFeaturePanelTabButtonState(featurePanelTabBasicButton, tab == FEATURE_PANEL_TAB_BASIC);
+        updateFeaturePanelTabButtonState(featurePanelTabRepositoryButton, tab == FEATURE_PANEL_TAB_REPOSITORY);
+        updateFeaturePanelTabButtonState(featurePanelTabLogButton, tab == FEATURE_PANEL_TAB_LOG);
+    }
+
+    private void updateFeaturePanelTabButtonState(Button button, boolean selected) {
+        if (button == null) {
+            return;
+        }
+        button.setEnabled(true);
+        button.setSelected(selected);
+        button.setAlpha(1.0f);
+        button.setBackgroundTintList(ColorStateList.valueOf(selected ? 0xFF2563EB : 0xFF9CA3AF));
+        button.setTextColor(0xFFFFFFFF);
+    }
+
+    private boolean isPersistedCookieChoiceSelected(String selectionKey) {
+        if (TextUtils.isEmpty(selectionKey)) {
+            return false;
+        }
+        Set<String> selectedKeys = preferences.getStringSet(PREF_PANEL_SELECTED_COOKIE_KEYS, new HashSet<>());
+        return selectedKeys.contains(selectionKey);
+    }
+
+    private void persistFeatureCookieChoiceSelection(FeatureCookieChoice choice, boolean selected) {
+        if (choice == null) {
+            return;
+        }
+        if (choice.currentPage) {
+            preferences.edit().putBoolean(PREF_PANEL_SELECT_CURRENT_PAGE_COOKIE, selected).apply();
+            return;
+        }
+        if (TextUtils.isEmpty(choice.selectionKey)) {
+            return;
+        }
+        Set<String> selectedKeys = new HashSet<>(preferences.getStringSet(PREF_PANEL_SELECTED_COOKIE_KEYS, new HashSet<>()));
+        if (selected) {
+            selectedKeys.add(choice.selectionKey);
+        } else {
+            selectedKeys.remove(choice.selectionKey);
+        }
+        preferences.edit().putStringSet(PREF_PANEL_SELECTED_COOKIE_KEYS, selectedKeys).apply();
+    }
+
+    private void startDailyDutyRequestsFromPanel(boolean startCheckedItemsOnly) {
+        if (featurePanelConcurrencyInput == null || featurePanelRequestIntervalInput == null) {
+            return;
+        }
+        if (dutyRequestQueue.isBusy()) {
+            Toast.makeText(this, "请求队列正在运行，请先暂停或终止。", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int concurrency = parsePositiveInt(featurePanelConcurrencyInput.getText().toString(), getSavedPanelConcurrency());
+        savePanelConcurrency(concurrency);
+        featurePanelConcurrencyInput.setText(String.valueOf(concurrency));
+        int requestIntervalMs = parseNonNegativeInt(
+                featurePanelRequestIntervalInput.getText().toString(),
+                getSavedPanelRequestInterval()
+        );
+        savePanelRequestInterval(requestIntervalMs);
+        featurePanelRequestIntervalInput.setText(String.valueOf(requestIntervalMs));
+
+        boolean dailyDutyChecked = featurePanelDailyDutyCheckBox != null && featurePanelDailyDutyCheckBox.isChecked();
+        if (startCheckedItemsOnly && !dailyDutyChecked) {
+            Toast.makeText(this, "No task selected.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        LinkedHashMap<String, DutyRequestQueue.CookieTarget> deduplicatedTargets = new LinkedHashMap<>();
+        for (FeatureCookieChoice choice : featureCookieChoices) {
+            if (!choice.selected || TextUtils.isEmpty(choice.baseUrl) || TextUtils.isEmpty(choice.cookies)) {
+                continue;
+            }
+            String key = choice.baseUrl + "\n" + choice.cookies;
+            if (!deduplicatedTargets.containsKey(key)) {
+                deduplicatedTargets.put(key, new DutyRequestQueue.CookieTarget(
+                        choice.currentPage ? "当前页面 Cookie" : choice.label,
+                        choice.baseUrl,
+                        choice.cookies
+                ));
+            }
+        }
+
+        if (deduplicatedTargets.isEmpty()) {
+            Toast.makeText(this, "请先勾选至少一个可用 Cookie。", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        dutyRequestQueue.startDailyDutyRewards(new ArrayList<>(deduplicatedTargets.values()), concurrency, requestIntervalMs);
+    }
+
+    private int parsePositiveInt(String value, int fallback) {
+        if (TextUtils.isEmpty(value)) {
+            return Math.max(1, fallback);
+        }
+        try {
+            return Math.max(1, Integer.parseInt(value.trim()));
+        } catch (Exception e) {
+            return Math.max(1, fallback);
+        }
+    }
+
+    private int parseNonNegativeInt(String value, int fallback) {
+        if (TextUtils.isEmpty(value)) {
+            return Math.max(0, fallback);
+        }
+        try {
+            return Math.max(0, Integer.parseInt(value.trim()));
+        } catch (Exception e) {
+            return Math.max(0, fallback);
+        }
+    }
+
+    private void renderFeaturePanelQueueState(DutyRequestQueue.StateSnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+
+        if (featurePanelQueueStatusText != null) {
+            String state;
+            if (snapshot.cancelling) {
+                state = "正在终止";
+            } else if (snapshot.running && snapshot.paused) {
+                state = "已暂停";
+            } else if (snapshot.running) {
+                state = "运行中";
+            } else {
+                state = "空闲";
+            }
+            featurePanelQueueStatusText.setText(
+                    "状态：" + state
+                            + "\n总数：" + snapshot.total
+                            + "  排队：" + snapshot.queued
+                            + "  进行中：" + snapshot.active
+                            + "\n完成：" + snapshot.completed
+                            + "  失败：" + snapshot.failed
+                            + "  跳过：" + snapshot.skipped
+            );
+        }
+
+        if (featurePanelQueueLogText != null) {
+            if (snapshot.logs.isEmpty()) {
+                featurePanelQueueLogText.setText("暂无日志");
+            } else {
+                StringBuilder builder = new StringBuilder();
+                for (String line : snapshot.logs) {
+                    if (builder.length() > 0) {
+                        builder.append('\n');
+                    }
+                    builder.append(line);
+                }
+                featurePanelQueueLogText.setText(builder.toString());
+            }
+        }
+
+        if (featurePanelPauseResumeButton != null) {
+            if (snapshot.running && snapshot.paused) {
+                featurePanelPauseResumeButton.setText("继续");
+            } else {
+                featurePanelPauseResumeButton.setText("暂停");
+            }
+            featurePanelPauseResumeButton.setEnabled(snapshot.running && !snapshot.cancelling);
+        }
+        if (featurePanelCancelButton != null) {
+            featurePanelCancelButton.setEnabled(snapshot.running || snapshot.paused || snapshot.cancelling);
+        }
+        boolean idle = !snapshot.running && !snapshot.paused && !snapshot.cancelling;
+        if (featurePanelDailyDutyRunButton != null) {
+            featurePanelDailyDutyRunButton.setEnabled(idle);
+        }
+        if (featurePanelStartSelectedButton != null) {
+            featurePanelStartSelectedButton.setEnabled(idle);
+        }
+    }
+
+    private int dpToPx(int dp) {
+        return Math.round(dp * getResources().getDisplayMetrics().density);
+    }
+
     private void requestAllFilesAccessPermission() {
         try {
             Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
@@ -1452,7 +3194,6 @@ public class MainActivity extends AppCompatActivity {
 
         customView = view;
         customViewCallback = callback;
-        originalSystemUiVisibility = getWindow().getDecorView().getSystemUiVisibility();
 
         browserChrome.setVisibility(View.GONE);
         if (fullscreenRotateButton != null) {
@@ -1461,6 +3202,9 @@ public class MainActivity extends AppCompatActivity {
         if (fullscreenExitButton != null) {
             fullscreenExitButton.setVisibility(View.VISIBLE);
         }
+        if (fullscreenFeaturePanelButton != null) {
+            fullscreenFeaturePanelButton.setVisibility(View.VISIBLE);
+        }
         fullscreenContainer.setVisibility(View.VISIBLE);
         fullscreenContainer.removeAllViews();
         fullscreenContainer.addView(view, new FrameLayout.LayoutParams(
@@ -1468,15 +3212,8 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
 
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        );
+        setSystemBarsHidden(true);
+        requestInsetRefresh();
     }
 
     private void hideFullscreenContent() {
@@ -1493,10 +3230,13 @@ public class MainActivity extends AppCompatActivity {
         if (fullscreenExitButton != null) {
             fullscreenExitButton.setVisibility(View.GONE);
         }
+        if (fullscreenFeaturePanelButton != null) {
+            fullscreenFeaturePanelButton.setVisibility(View.GONE);
+        }
 
-        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        getWindow().getDecorView().setSystemUiVisibility(originalSystemUiVisibility);
+        setSystemBarsHidden(false);
         applySavedOrientation();
+        requestInsetRefresh();
 
         if (customViewCallback != null) {
             customViewCallback.onCustomViewHidden();
@@ -1745,7 +3485,7 @@ public class MainActivity extends AppCompatActivity {
         String host = resolvedUri == null ? "" : String.valueOf(resolvedUri.getHost());
         String path = resolvedUri == null ? "" : String.valueOf(resolvedUri.getPath());
         if (host.endsWith("pvzol.org") || path.startsWith("/pvz/") || path.startsWith("/youkia/")) {
-            Log.d(TAG, stage + " original=" + originalUri + " resolved=" + resolvedUri);
+            return;
         }
     }
 
@@ -1875,7 +3615,7 @@ public class MainActivity extends AppCompatActivity {
         script.append("c.allowScriptAccess=true;");
         script.append("c.allowNetworking='all';");
         script.append("c.openUrlMode='allow';");
-        script.append("c.logLevel='debug';");
+        script.append("c.logLevel='error';");
         script.append("if(window.navigator&&('gpu' in navigator)){c.preferredRenderer='webgpu';}");
         script.append("else if(window.WebGLRenderingContext||window.WebGL2RenderingContext){c.preferredRenderer='wgpu-webgl';}");
 
@@ -2086,8 +3826,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    @Override
-    public void onBackPressed() {
+    private void handleBackNavigation() {
         if (customView != null) {
             hideFullscreenContent();
             return;
@@ -2099,7 +3838,18 @@ public class MainActivity extends AppCompatActivity {
         if (wrapper.canGoBack()) {
             wrapper.goBack();
         } else {
-            super.onBackPressed();
+            finish();
         }
+    }
+
+    private static final class FeatureCookieChoice {
+        String label;
+        String subtitle;
+        String pageUrl;
+        String baseUrl;
+        String cookies;
+        String selectionKey;
+        boolean selected;
+        boolean currentPage;
     }
 }

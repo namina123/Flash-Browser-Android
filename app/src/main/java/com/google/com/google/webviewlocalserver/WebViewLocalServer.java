@@ -360,7 +360,6 @@ public class WebViewLocalServer {
                 if (path.indexOf("/") == 0)
                     path = path.substring(1); //Removes the forward slash at the beginning since that causes the asset manager to not find the file
                 try {
-                    Log.d("WebViewLocalServer", "Attempting to open " + path);
                     stream = protocolHandler.openAsset(path);
                 } catch (IOException e) {
                     Log.e(TAG, "Unable to open asset URL: " + url);

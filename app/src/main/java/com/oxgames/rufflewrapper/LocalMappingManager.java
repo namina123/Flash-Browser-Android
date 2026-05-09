@@ -78,7 +78,6 @@ final class LocalMappingManager {
 
         String path = normalizeRequestPath(uri.getPath());
         if (PVZOL_MAIN_PATH.equals(path)) {
-            Log.d(TAG, "Skipping local mapping for main entry: " + uri);
             return null;
         }
 
@@ -86,12 +85,9 @@ final class LocalMappingManager {
         for (String candidate : candidates) {
             MappedResource resource = tryOpenAsset(candidate);
             if (resource != null) {
-                Log.d(TAG, "Local mapping hit: " + uri + " -> assets/" + candidate);
                 return resource;
             }
         }
-
-        Log.d(TAG, "Local mapping miss: " + uri + " candidates=" + candidates);
         return null;
     }
 

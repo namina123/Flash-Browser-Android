@@ -74,9 +74,9 @@
                 android:layout_width="36dp"
                 android:layout_height="36dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/go"
+                android:contentDescription="功能面板"
                 android:padding="8dp"
-                android:src="@android:drawable/ic_menu_search" />
+                android:src="@android:drawable/ic_menu_more" />
 
             <ImageButton
                 android:id="@+id/btn_fullscreen"
@@ -155,6 +155,33 @@
         android:padding="10dp"
         android:src="@android:drawable/ic_menu_close_clear_cancel"
         android:tint="#ffffff"
+        android:visibility="gone" />
+
+    <ImageButton
+        android:id="@+id/btn_feature_panel_fullscreen"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="116dp"
+        android:background="#66000000"
+        android:contentDescription="Feature panel"
+        android:padding="10dp"
+        android:src="@android:drawable/ic_menu_more"
+        android:tint="#ffffff"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/btn_legacy_youkia_redirect"
+        android:layout_width="wrap_content"
+        android:layout_height="44dp"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="18dp"
+        android:backgroundTint="#2563eb"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:text="跳转到游戏页"
+        android:textColor="#ffffff"
         android:visibility="gone" />
 
 </FrameLayout>
