@@ -3,12 +3,13 @@ plugins {
 }
 
 android {
-    compileSdk 32
+    namespace "com.oxgames.rufflewrapper"
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.oxgames.rufflewrapper"
         minSdk 21
-        targetSdk 32
+        targetSdk 35
         versionCode 1
         versionName "1.0"
 
@@ -28,18 +29,17 @@ android {
     sourceSets {
         main {
             java {
-                srcDirs 'src\\main\\java', 'src\\main\\java\\com\\google\\webviewlocalserver', 'src\\main\\java\\google', 'src\\main\\java\\com\\google', 'src\\main\\java\\com\\google\\webviewlocalserver\\third_party', 'src\\main\\java\\com\\google\\webviewlocalserver\\third_party\\android', 'src\\main\\java\\com\\google\\webviewlocalserver\\third_party\\chromium'
+                srcDirs 'src/main/java', 'src/main/java/com/google/webviewlocalserver', 'src/main/java/google', 'src/main/java/com/google', 'src/main/java/com/google/webviewlocalserver/third_party', 'src/main/java/com/google/webviewlocalserver/third_party/android', 'src/main/java/com/google/webviewlocalserver/third_party/chromium'
             }
         }
     }
 }
 
 dependencies {
-
-    implementation 'androidx.appcompat:appcompat:1.4.1'
-    implementation 'com.google.android.material:material:1.5.0'
-    implementation 'androidx.constraintlayout:constraintlayout:2.1.3'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
     testImplementation 'junit:junit:4.13.2'
-    androidTestImplementation 'androidx.test.ext:junit:1.1.3'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.6.1'
 }
