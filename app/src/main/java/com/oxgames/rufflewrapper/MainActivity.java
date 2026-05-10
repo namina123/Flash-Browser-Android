@@ -206,6 +206,7 @@ public class MainActivity extends AppCompatActivity {
     private CookieProfileManager cookieProfileManager;
     private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
     private final FeaturePanelUiController featurePanelUiController = new FeaturePanelUiController();
+    private FeaturePanelCookieController featurePanelCookieController;
     private String pendingLegacyYoukiaSourceUrl;
     private String pendingLegacyYoukiaTargetUrl;
     private AlertDialog featurePanelDialog;
@@ -286,6 +287,7 @@ public class MainActivity extends AppCompatActivity {
         localMappingManager = new LocalMappingManager(this);
         localMappingManager.initialize();
         cookieProfileManager = new CookieProfileManager(this);
+        featurePanelCookieController = new FeaturePanelCookieController(this, preferenceStore, cookieProfileManager);
         warehouseRecordManager = new WarehouseRecordManager(this);
         cookieProfileManager.ensureInitialized();
         dutyRequestQueue.setListener(snapshot -> runOnUiThread(() -> renderFeaturePanelQueueState(snapshot)));
@@ -2026,6 +2028,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshFeaturePanelCookieChoices() {
+        if (featurePanelCookieController != null) {
+            featurePanelCookieController.renderChoices(
+                    featurePanelCookieContainer,
+                    featurePanelCookieHintText,
+                    featurePanelStorageAccessButton,
+                    featureCookieChoices,
+                    buildCurrentPageFeatureCookieChoice(),
+                    this::onFeaturePanelCookieChoicesChanged
+            );
+            return;
+        }
         if (featurePanelCookieContainer == null) {
             return;
         }
@@ -2102,6 +2115,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectAllFeaturePanelCookies() {
+        if (featurePanelCookieController != null) {
+            featurePanelCookieController.selectAll(featureCookieChoices);
+            refreshFeaturePanelCookieChoices();
+            return;
+        }
         if (featureCookieChoices.isEmpty()) {
             return;
         }
@@ -3858,14 +3876,4 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private static final class FeatureCookieChoice {
-        String label;
-        String subtitle;
-        String pageUrl;
-        String baseUrl;
-        String cookies;
-        String selectionKey;
-        boolean selected;
-        boolean currentPage;
-    }
 }
