@@ -108,55 +108,6 @@ public class MainActivity extends AppCompatActivity {
     private static final float TOUCH_HOLD_MOVE_TOLERANCE_DP = 18f;
     private static final String DEFAULT_MANUAL_TEST_SWF = "http://pvzol.org/youkia/main.swf";
     private static final String MANUAL_TEST_PROXY_BASE_URL = "https://webbrowsertools.com/__manual_test__/index.html";
-    private static final int CONNECT_TIMEOUT_MS = 15000;
-    private static final int READ_TIMEOUT_MS = 30000;
-    private static final Pattern CHARSET_PATTERN =
-            Pattern.compile("charset=([^;]+)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern CSP_META_PATTERN =
-            Pattern.compile(
-                    "<meta[^>]+http-equiv\\s*=\\s*(['\"])content-security-policy(?:-report-only)?\\1[^>]*>",
-                    Pattern.CASE_INSENSITIVE);
-    private static final Set<String> HOP_BY_HOP_HEADERS = new HashSet<>(Arrays.asList(
-            "connection",
-            "keep-alive",
-            "proxy-authenticate",
-            "proxy-authorization",
-            "te",
-            "trailers",
-            "transfer-encoding",
-            "upgrade"
-    ));
-    private static final Set<String> SKIPPED_REQUEST_HEADERS = new HashSet<>(Arrays.asList(
-            "accept-encoding",
-            "content-length",
-            "host"
-    ));
-    private static final Set<String> OVERRIDDEN_IE_REQUEST_HEADERS = new HashSet<>(Arrays.asList(
-            "user-agent",
-            "accept",
-            "accept-language",
-            "x-requested-with",
-            "sec-ch-ua",
-            "sec-ch-ua-mobile",
-            "sec-ch-ua-platform",
-            "sec-ch-ua-platform-version",
-            "sec-ch-ua-model",
-            "sec-ch-ua-full-version",
-            "sec-ch-ua-full-version-list",
-            "sec-fetch-site",
-            "sec-fetch-mode",
-            "sec-fetch-user",
-            "sec-fetch-dest",
-            "priority"
-    ));
-    private static final Set<String> STRIPPED_RESPONSE_HEADERS = new HashSet<>(Arrays.asList(
-            "content-encoding",
-            "content-length",
-            "content-security-policy",
-            "content-security-policy-report-only",
-            "x-frame-options"
-    ));
-
     private WebView wrapper;
     private EditText urlInput;
     private ProgressBar progressBar;
@@ -196,6 +147,7 @@ public class MainActivity extends AppCompatActivity {
     private LocalMappingManager localMappingManager;
     private CookieProfileManager cookieProfileManager;
     private BrowserSettingsController browserSettingsController;
+    private BrowserRequestController browserRequestController;
     private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
     private final FeaturePanelUiController featurePanelUiController = new FeaturePanelUiController();
     private FeaturePanelCookieController featurePanelCookieController;
@@ -274,6 +226,11 @@ public class MainActivity extends AppCompatActivity {
         localMappingManager = new LocalMappingManager(this);
         localMappingManager.initialize();
         cookieProfileManager = new CookieProfileManager(this);
+        browserRequestController = new BrowserRequestController(
+                this,
+                localMappingManager,
+                this::getSavedFontMode
+        );
         browserSettingsController = new BrowserSettingsController(
                 this,
                 cookieProfileManager,
@@ -564,45 +521,7 @@ public class MainActivity extends AppCompatActivity {
         wrapper.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                Uri url = request.getUrl();
-                if (url == null) {
-                    return null;
-                }
-
-                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
-                    return createEmptyCorsResponse();
-                }
-
-                if (isRuffleAssetRequest(url)) {
-                    return serveRuffleAsset(url);
-                }
-
-                if (isProxyAssetRequest(url)) {
-                    Uri targetUrl = resolveProxyTarget(url);
-                    WebResourceResponse mappedResponse = tryServeMappedResource(targetUrl);
-                    if (mappedResponse != null) {
-                        logLocalIntercept("proxy-local-hit", url, targetUrl);
-                        return mappedResponse;
-                    }
-                    if (targetUrl != null && isProxyableRequest(targetUrl, request.getMethod())) {
-                        logLocalIntercept("proxy-forward", url, targetUrl);
-                        return proxyRequest(targetUrl, request);
-                    }
-                    return null;
-                }
-
-                WebResourceResponse mappedResponse = tryServeMappedResource(url);
-                if (mappedResponse != null) {
-                    logLocalIntercept("direct-local-hit", url, url);
-                    return mappedResponse;
-                }
-
-                if (shouldProxyMainFrameRequest(url, request)) {
-                    logLocalIntercept("main-frame-forward", url, url);
-                    return proxyRequest(url, request);
-                }
-
-                return null;
+                return browserRequestController.shouldInterceptRequest(request);
             }
 
             @Override
@@ -940,7 +859,7 @@ public class MainActivity extends AppCompatActivity {
         html.append("#player-host,#player-host ruffle-player{width:100%;height:100%;}");
         html.append("ruffle-player,ruffle-embed,ruffle-object{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;}");
         html.append("</style>");
-        html.append("<script>").append(buildRuffleConfigScript()).append("</script>");
+        html.append("<script>").append(browserRequestController.buildRuffleConfigScript()).append("</script>");
         html.append("<script src='").append(RUFFLE_PATH_PREFIX).append("ruffle.js'></script>");
         html.append("</head><body>");
         html.append("<div class='meta'>");
@@ -972,7 +891,7 @@ public class MainActivity extends AppCompatActivity {
         html.append("host.appendChild(player);");
         html.append("window.__manualRufflePlayer=player;");
         html.append("setStatus('loading');");
-        html.append("var result=player.load('").append(escapeJsString(loadTarget)).append("');");
+        html.append("var result=player.load('").append(browserRequestController.escapeJsString(loadTarget)).append("');");
         html.append("if(result&&typeof result.then==='function'){");
         html.append("result.then(function(){setStatus('loaded');}).catch(function(error){setStatus('load failed: '+(error&&error.message?error.message:String(error)));});");
         html.append("}else{setStatus('load dispatched');}");
@@ -2234,6 +2153,206 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (wrapper != null) {
+            wrapper.saveState(outState);
+        }
+    }
+
+    private void handleBackNavigation() {
+        if (customView != null) {
+            hideFullscreenContent();
+            return;
+        }
+        if (inAppRuffleFullscreen) {
+            toggleRuffleFullscreenCompat();
+            return;
+        }
+        if (wrapper.canGoBack()) {
+            wrapper.goBack();
+        } else {
+            finish();
+        }
+    }
+
+}
+
+final class BrowserRequestController {
+    interface Host {
+        int getSelectedFontMode();
+    }
+
+    private static final String TAG = "FlashBrowser";
+    private static final String IE_USER_AGENT =
+            "Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; Trident/6.0)";
+    private static final String IE_ACCEPT =
+            "text/html, application/xhtml+xml, */*";
+    private static final String IE_ACCEPT_LANGUAGE =
+            "zh-CN,zh;q=0.9,en;q=0.8";
+    private static final String RUFFLE_PATH_PREFIX = "/__ruffle__/";
+    private static final String PROXY_PATH_PREFIX = "/__proxy__/";
+    private static final String BOOTSTRAP_SCRIPT = "bootstrap.js";
+    private static final int CONNECT_TIMEOUT_MS = 15000;
+    private static final int READ_TIMEOUT_MS = 30000;
+    private static final int FONT_MODE_CHINESE_SANS = 0;
+    private static final int FONT_MODE_CHINESE_SERIF = 1;
+    private static final int FONT_MODE_EMBEDDED = 2;
+    private static final Pattern CHARSET_PATTERN =
+            Pattern.compile("charset=([^;]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CSP_META_PATTERN =
+            Pattern.compile(
+                    "(?is)<meta[^>]+http-equiv\\s*=\\s*['\\\"]Content-Security-Policy['\\\"][^>]*>",
+                    Pattern.CASE_INSENSITIVE
+            );
+    private static final Set<String> HOP_BY_HOP_HEADERS = new HashSet<>(Arrays.asList(
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailers",
+            "transfer-encoding",
+            "upgrade"
+    ));
+    private static final Set<String> SKIPPED_REQUEST_HEADERS = new HashSet<>(Arrays.asList(
+            "host",
+            "connection",
+            "accept-encoding",
+            "cookie"
+    ));
+    private static final Set<String> OVERRIDDEN_IE_REQUEST_HEADERS = new HashSet<>(Arrays.asList(
+            "user-agent",
+            "accept",
+            "accept-language",
+            "cache-control",
+            "pragma"
+    ));
+    private static final Set<String> STRIPPED_RESPONSE_HEADERS = new HashSet<>(Arrays.asList(
+            "content-encoding",
+            "content-length",
+            "content-security-policy",
+            "content-security-policy-report-only",
+            "x-frame-options"
+    ));
+
+    private final AppCompatActivity activity;
+    private final LocalMappingManager localMappingManager;
+    private final Host host;
+
+    BrowserRequestController(
+            AppCompatActivity activity,
+            LocalMappingManager localMappingManager,
+            Host host
+    ) {
+        this.activity = activity;
+        this.localMappingManager = localMappingManager;
+        this.host = host;
+    }
+
+    WebResourceResponse shouldInterceptRequest(WebResourceRequest request) {
+        if (request == null) {
+            return null;
+        }
+
+        Uri url = request.getUrl();
+        if (url == null) {
+            return null;
+        }
+
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return createEmptyCorsResponse();
+        }
+
+        if (isRuffleAssetRequest(url)) {
+            return serveRuffleAsset(url);
+        }
+
+        if (isProxyAssetRequest(url)) {
+            Uri targetUrl = resolveProxyTarget(url);
+            WebResourceResponse mappedResponse = tryServeMappedResource(targetUrl);
+            if (mappedResponse != null) {
+                logLocalIntercept("proxy-local-hit", url, targetUrl);
+                return mappedResponse;
+            }
+            if (targetUrl != null && isProxyableRequest(targetUrl, request.getMethod())) {
+                logLocalIntercept("proxy-forward", url, targetUrl);
+                return proxyRequest(targetUrl, request);
+            }
+            return null;
+        }
+
+        WebResourceResponse mappedResponse = tryServeMappedResource(url);
+        if (mappedResponse != null) {
+            logLocalIntercept("direct-local-hit", url, url);
+            return mappedResponse;
+        }
+
+        if (shouldProxyMainFrameRequest(url, request)) {
+            logLocalIntercept("main-frame-forward", url, url);
+            return proxyRequest(url, request);
+        }
+
+        return null;
+    }
+
+    String buildRuffleConfigScript() {
+        int fontMode = host.getSelectedFontMode();
+        StringBuilder script = new StringBuilder();
+        script.append("(function(){");
+        script.append("var ieUa='").append(escapeJsString(IE_USER_AGENT)).append("';");
+        script.append("try{Object.defineProperty(navigator,'userAgent',{get:function(){return ieUa;},configurable:true});}catch(e){}");
+        script.append("try{Object.defineProperty(navigator,'appVersion',{get:function(){return ieUa;},configurable:true});}catch(e){}");
+        script.append("try{Object.defineProperty(navigator,'appName',{get:function(){return 'Microsoft Internet Explorer';},configurable:true});}catch(e){}");
+        script.append("try{Object.defineProperty(navigator,'platform',{get:function(){return 'Win32';},configurable:true});}catch(e){}");
+        script.append("try{Object.defineProperty(navigator,'vendor',{get:function(){return '';},configurable:true});}catch(e){}");
+        script.append("try{Object.defineProperty(document,'documentMode',{get:function(){return 10;},configurable:true});}catch(e){}");
+        script.append("window.RufflePlayer=window.RufflePlayer||{};");
+        script.append("window.RufflePlayer.config=window.RufflePlayer.config||{};");
+        script.append("var c=window.RufflePlayer.config;");
+        script.append("c.allowScriptAccess=true;");
+        script.append("c.allowNetworking='all';");
+        script.append("c.openUrlMode='allow';");
+        script.append("c.logLevel='error';");
+        script.append("if(window.navigator&&('gpu' in navigator)){c.preferredRenderer='webgpu';}");
+        script.append("else if(window.WebGLRenderingContext||window.WebGL2RenderingContext){c.preferredRenderer='wgpu-webgl';}");
+
+        if (fontMode == FONT_MODE_EMBEDDED) {
+            script.append("c.deviceFontRenderer='embedded';");
+            script.append("c.defaultFonts={};");
+        } else if (fontMode == FONT_MODE_CHINESE_SERIF) {
+            script.append("c.deviceFontRenderer='canvas';");
+            script.append("c.defaultFonts={");
+            script.append("sans:['Noto Serif CJK SC','Noto Serif SC','Source Han Serif SC','serif'],");
+            script.append("serif:['Noto Serif CJK SC','Noto Serif SC','Source Han Serif SC','serif'],");
+            script.append("typewriter:['monospace'],");
+            script.append("japaneseGothic:['Noto Sans CJK SC','Noto Sans SC','Source Han Sans SC','Droid Sans Fallback','sans-serif'],");
+            script.append("japaneseGothicMono:['monospace'],");
+            script.append("japaneseMincho:['Noto Serif CJK SC','Noto Serif SC','Source Han Serif SC','serif']");
+            script.append("};");
+        } else {
+            script.append("c.deviceFontRenderer='canvas';");
+            script.append("c.defaultFonts={");
+            script.append("sans:['Noto Sans CJK SC','Noto Sans SC','Source Han Sans SC','Droid Sans Fallback','sans-serif'],");
+            script.append("serif:['Noto Serif CJK SC','Noto Serif SC','Source Han Serif SC','serif'],");
+            script.append("typewriter:['monospace'],");
+            script.append("japaneseGothic:['Noto Sans CJK SC','Noto Sans SC','Source Han Sans SC','Droid Sans Fallback','sans-serif'],");
+            script.append("japaneseGothicMono:['monospace'],");
+            script.append("japaneseMincho:['Noto Serif CJK SC','Noto Serif SC','Source Han Serif SC','serif']");
+            script.append("};");
+        }
+
+        script.append("})();");
+        return script.toString();
+    }
+
+    String escapeJsString(String value) {
+        return value
+                .replace("\\", "\\\\")
+                .replace("'", "\\'");
+    }
+
     private WebResourceResponse proxyRequest(Uri targetUrl, WebResourceRequest request) {
         HttpURLConnection connection = null;
         try {
@@ -2261,7 +2380,7 @@ public class MainActivity extends AppCompatActivity {
                 responseStream = new ByteArrayInputStream(new byte[0]);
             }
 
-            if (shouldInjectHtml(request, statusCode, mimeType)) {
+            if (shouldInjectHtml(statusCode, mimeType)) {
                 responseHeaders = new HashMap<>(responseHeaders);
                 stripHtmlSecurityHeaders(responseHeaders);
 
@@ -2375,7 +2494,7 @@ public class MainActivity extends AppCompatActivity {
 
         String assetPath = "ruffle/" + assetName;
         try {
-            InputStream inputStream = getAssets().open(assetPath);
+            InputStream inputStream = activity.getAssets().open(assetPath);
             String mimeType = guessMimeType(assetName);
             String encoding = mimeType.startsWith("text/") || mimeType.contains("javascript")
                     ? StandardCharsets.UTF_8.name()
@@ -2457,9 +2576,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void logLocalIntercept(String stage, Uri originalUri, Uri resolvedUri) {
-        String host = resolvedUri == null ? "" : String.valueOf(resolvedUri.getHost());
-        String path = resolvedUri == null ? "" : String.valueOf(resolvedUri.getPath());
-        if (host.endsWith("pvzol.org") || path.startsWith("/pvz/") || path.startsWith("/youkia/")) {
+        String hostValue = resolvedUri == null ? "" : String.valueOf(resolvedUri.getHost());
+        String pathValue = resolvedUri == null ? "" : String.valueOf(resolvedUri.getPath());
+        if (hostValue.endsWith("pvzol.org") || pathValue.startsWith("/pvz/") || pathValue.startsWith("/youkia/")) {
             return;
         }
     }
@@ -2537,7 +2656,7 @@ public class MainActivity extends AppCompatActivity {
         return connection.getInputStream();
     }
 
-    private boolean shouldInjectHtml(WebResourceRequest request, int statusCode, String mimeType) {
+    private boolean shouldInjectHtml(int statusCode, String mimeType) {
         if (statusCode < 200 || statusCode >= 300) {
             return false;
         }
@@ -2546,8 +2665,7 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
 
-        String normalizedMimeType = mimeType.toLowerCase(Locale.US);
-        return normalizedMimeType.contains("text/html");
+        return mimeType.toLowerCase(Locale.US).contains("text/html");
     }
 
     private String injectBootstrapIntoHtml(String html) {
@@ -2571,62 +2689,6 @@ public class MainActivity extends AppCompatActivity {
     private String buildRuffleInjectionTag() {
         return "<script>" + buildRuffleConfigScript() + "</script>"
                 + "<script src=\"" + RUFFLE_PATH_PREFIX + BOOTSTRAP_SCRIPT + "\"></script>";
-    }
-
-    private String buildRuffleConfigScript() {
-        int fontMode = getSavedFontMode();
-        StringBuilder script = new StringBuilder();
-        script.append("(function(){");
-        script.append("var ieUa='").append(escapeJsString(IE_USER_AGENT)).append("';");
-        script.append("try{Object.defineProperty(navigator,'userAgent',{get:function(){return ieUa;},configurable:true});}catch(e){}");
-        script.append("try{Object.defineProperty(navigator,'appVersion',{get:function(){return ieUa;},configurable:true});}catch(e){}");
-        script.append("try{Object.defineProperty(navigator,'appName',{get:function(){return 'Microsoft Internet Explorer';},configurable:true});}catch(e){}");
-        script.append("try{Object.defineProperty(navigator,'platform',{get:function(){return 'Win32';},configurable:true});}catch(e){}");
-        script.append("try{Object.defineProperty(navigator,'vendor',{get:function(){return '';},configurable:true});}catch(e){}");
-        script.append("try{Object.defineProperty(document,'documentMode',{get:function(){return 10;},configurable:true});}catch(e){}");
-        script.append("window.RufflePlayer=window.RufflePlayer||{};");
-        script.append("window.RufflePlayer.config=window.RufflePlayer.config||{};");
-        script.append("var c=window.RufflePlayer.config;");
-        script.append("c.allowScriptAccess=true;");
-        script.append("c.allowNetworking='all';");
-        script.append("c.openUrlMode='allow';");
-        script.append("c.logLevel='error';");
-        script.append("if(window.navigator&&('gpu' in navigator)){c.preferredRenderer='webgpu';}");
-        script.append("else if(window.WebGLRenderingContext||window.WebGL2RenderingContext){c.preferredRenderer='wgpu-webgl';}");
-
-        if (fontMode == FONT_MODE_EMBEDDED) {
-            script.append("c.deviceFontRenderer='embedded';");
-            script.append("c.defaultFonts={};");
-        } else if (fontMode == FONT_MODE_CHINESE_SERIF) {
-            script.append("c.deviceFontRenderer='canvas';");
-            script.append("c.defaultFonts={");
-            script.append("sans:['Noto Serif CJK SC','Noto Serif SC','Source Han Serif SC','serif'],");
-            script.append("serif:['Noto Serif CJK SC','Noto Serif SC','Source Han Serif SC','serif'],");
-            script.append("typewriter:['monospace'],");
-            script.append("japaneseGothic:['Noto Sans CJK SC','Noto Sans SC','Source Han Sans SC','Droid Sans Fallback','sans-serif'],");
-            script.append("japaneseGothicMono:['monospace'],");
-            script.append("japaneseMincho:['Noto Serif CJK SC','Noto Serif SC','Source Han Serif SC','serif']");
-            script.append("};");
-        } else {
-            script.append("c.deviceFontRenderer='canvas';");
-            script.append("c.defaultFonts={");
-            script.append("sans:['Noto Sans CJK SC','Noto Sans SC','Source Han Sans SC','Droid Sans Fallback','sans-serif'],");
-            script.append("serif:['Noto Serif CJK SC','Noto Serif SC','Source Han Serif SC','serif'],");
-            script.append("typewriter:['monospace'],");
-            script.append("japaneseGothic:['Noto Sans CJK SC','Noto Sans SC','Source Han Sans SC','Droid Sans Fallback','sans-serif'],");
-            script.append("japaneseGothicMono:['monospace'],");
-            script.append("japaneseMincho:['Noto Serif CJK SC','Noto Serif SC','Source Han Serif SC','serif']");
-            script.append("};");
-        }
-
-        script.append("})();");
-        return script.toString();
-    }
-
-    private String escapeJsString(String value) {
-        return value
-                .replace("\\", "\\\\")
-                .replace("'", "\\'");
     }
 
     private String getMimeType(HttpURLConnection connection, Uri uri) {
@@ -2733,9 +2795,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean shouldProxyMainFrameRequest(Uri uri, WebResourceRequest request) {
-        return request != null
-                && request.isForMainFrame()
-                && isProxyableRequest(uri, request.getMethod());
+        return request.isForMainFrame() && isProxyableRequest(uri, request.getMethod());
     }
 
     private boolean isRuffleAssetRequest(Uri uri) {
@@ -2792,31 +2852,6 @@ public class MainActivity extends AppCompatActivity {
         }
         return authorityAndPath.substring(slashIndex);
     }
-
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        super.onSaveInstanceState(outState);
-        if (wrapper != null) {
-            wrapper.saveState(outState);
-        }
-    }
-
-    private void handleBackNavigation() {
-        if (customView != null) {
-            hideFullscreenContent();
-            return;
-        }
-        if (inAppRuffleFullscreen) {
-            toggleRuffleFullscreenCompat();
-            return;
-        }
-        if (wrapper.canGoBack()) {
-            wrapper.goBack();
-        } else {
-            finish();
-        }
-    }
-
 }
 
 final class FeaturePanelRepositoryController {
