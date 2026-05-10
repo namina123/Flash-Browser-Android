@@ -40,7 +40,7 @@ android {
     sourceSets {
         main {
             java {
-                srcDirs 'src/main/java', 'src/main/java/com/google/webviewlocalserver', 'src/main/java/google', 'src/main/java/com/google', 'src/main/java/com/google/webviewlocalserver/third_party', 'src/main/java/com/google/webviewlocalserver/third_party/android', 'src/main/java/com/google/webviewlocalserver/third_party/chromium'
+                srcDirs = ['src/main/java']
             }
         }
     }
