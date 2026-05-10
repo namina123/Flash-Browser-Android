@@ -207,6 +207,7 @@ public class MainActivity extends AppCompatActivity {
     private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
     private final FeaturePanelUiController featurePanelUiController = new FeaturePanelUiController();
     private FeaturePanelCookieController featurePanelCookieController;
+    private FeaturePanelTaskController featurePanelTaskController;
     private String pendingLegacyYoukiaSourceUrl;
     private String pendingLegacyYoukiaTargetUrl;
     private AlertDialog featurePanelDialog;
@@ -288,6 +289,7 @@ public class MainActivity extends AppCompatActivity {
         localMappingManager.initialize();
         cookieProfileManager = new CookieProfileManager(this);
         featurePanelCookieController = new FeaturePanelCookieController(this, preferenceStore, cookieProfileManager);
+        featurePanelTaskController = new FeaturePanelTaskController(preferenceStore);
         warehouseRecordManager = new WarehouseRecordManager(this);
         cookieProfileManager.ensureInitialized();
         dutyRequestQueue.setListener(snapshot -> runOnUiThread(() -> renderFeaturePanelQueueState(snapshot)));
@@ -2941,7 +2943,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int getSavedPanelConcurrency() {
-        return preferenceStore.getPanelConcurrency(1);
+        return featurePanelTaskController == null ? preferenceStore.getPanelConcurrency(1)
+                : featurePanelTaskController.getSavedConcurrency();
     }
 
     private void savePanelConcurrency(int concurrency) {
@@ -2949,7 +2952,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int getSavedPanelRequestInterval() {
-        return preferenceStore.getPanelRequestInterval(700);
+        return featurePanelTaskController == null ? preferenceStore.getPanelRequestInterval(700)
+                : featurePanelTaskController.getSavedRequestInterval();
     }
 
     private void savePanelRequestInterval(int intervalMs) {
@@ -2957,7 +2961,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int getSavedPanelFrequentRetryInterval() {
-        return preferenceStore.getPanelFrequentRetryInterval(14000);
+        return featurePanelTaskController == null ? preferenceStore.getPanelFrequentRetryInterval(14000)
+                : featurePanelTaskController.getSavedFrequentRetryInterval();
     }
 
     private void savePanelFrequentRetryInterval(int intervalMs) {
@@ -3006,6 +3011,32 @@ public class MainActivity extends AppCompatActivity {
         if (featurePanelConcurrencyInput == null
                 || featurePanelRequestIntervalInput == null
                 || featurePanelFrequentRetryIntervalInput == null) {
+            return;
+        }
+        if (featurePanelTaskController != null && !dutyRequestQueue.isBusy()) {
+            boolean dailyDutyChecked = featurePanelDailyDutyCheckBox != null && featurePanelDailyDutyCheckBox.isChecked();
+            FeaturePanelTaskController.BuildResult buildResult = featurePanelTaskController.buildStartRequest(
+                    featureCookieChoices,
+                    featurePanelConcurrencyInput.getText().toString(),
+                    featurePanelRequestIntervalInput.getText().toString(),
+                    featurePanelFrequentRetryIntervalInput.getText().toString(),
+                    dailyDutyChecked,
+                    startCheckedItemsOnly
+            );
+            featurePanelConcurrencyInput.setText(String.valueOf(getSavedPanelConcurrency()));
+            featurePanelRequestIntervalInput.setText(String.valueOf(getSavedPanelRequestInterval()));
+            featurePanelFrequentRetryIntervalInput.setText(String.valueOf(getSavedPanelFrequentRetryInterval()));
+            if (buildResult.errorMessage != null) {
+                Toast.makeText(this, buildResult.errorMessage, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            FeaturePanelTaskController.StartRequest request = buildResult.request;
+            dutyRequestQueue.startDailyDutyRewards(
+                    request.targets,
+                    request.concurrency,
+                    request.requestIntervalMs,
+                    request.frequentRetryIntervalMs
+            );
             return;
         }
         if (dutyRequestQueue.isBusy()) {
