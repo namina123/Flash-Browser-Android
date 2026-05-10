@@ -1,17 +1,17 @@
-package com.oxgames.rufflewrapper;
+package com.namina.flashbrowser;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-import com.oxgames.rufflewrapper.amf.Amf0Body;
-import com.oxgames.rufflewrapper.amf.Amf0Message;
-import com.oxgames.rufflewrapper.amf.Amf3Object;
-import com.oxgames.rufflewrapper.amf.AmfArray;
-import com.oxgames.rufflewrapper.amf.AmfCodec;
-import com.oxgames.rufflewrapper.amf.ArrayCollection;
-import com.oxgames.rufflewrapper.amf.AsObject;
+import com.namina.flashbrowser.amf.Amf0Body;
+import com.namina.flashbrowser.amf.Amf0Message;
+import com.namina.flashbrowser.amf.Amf3Object;
+import com.namina.flashbrowser.amf.AmfArray;
+import com.namina.flashbrowser.amf.AmfCodec;
+import com.namina.flashbrowser.amf.ArrayCollection;
+import com.namina.flashbrowser.amf.AsObject;
 
 import org.junit.Test;
 

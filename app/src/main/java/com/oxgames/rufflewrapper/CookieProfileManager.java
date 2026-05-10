@@ -1,4 +1,4 @@
-package com.oxgames.rufflewrapper;
+package com.namina.flashbrowser;
 
 import android.annotation.SuppressLint;
 import android.content.Context;

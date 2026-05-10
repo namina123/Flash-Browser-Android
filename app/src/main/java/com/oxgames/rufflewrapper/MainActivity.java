@@ -1,4 +1,4 @@
-package com.oxgames.rufflewrapper;
+package com.namina.flashbrowser;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
@@ -11,7 +11,6 @@ import androidx.core.view.WindowInsetsControllerCompat;
 
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
-import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.net.http.SslError;
@@ -206,6 +205,7 @@ public class MainActivity extends AppCompatActivity {
     private LocalMappingManager localMappingManager;
     private CookieProfileManager cookieProfileManager;
     private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
+    private final FeaturePanelUiController featurePanelUiController = new FeaturePanelUiController();
     private String pendingLegacyYoukiaSourceUrl;
     private String pendingLegacyYoukiaTargetUrl;
     private AlertDialog featurePanelDialog;
@@ -1908,6 +1908,22 @@ public class MainActivity extends AppCompatActivity {
         featurePanelRepositoryIgnoredContainer = dialogView.findViewById(R.id.panel_repository_ignored_container);
         featurePanelQueueStatusText = dialogView.findViewById(R.id.text_panel_queue_status);
         featurePanelQueueLogText = dialogView.findViewById(R.id.text_panel_queue_log);
+        featurePanelUiController.bind(
+                featurePanelTabCookieButton,
+                featurePanelTabBasicButton,
+                featurePanelTabRepositoryButton,
+                featurePanelTabLogButton,
+                featurePanelCookiePage,
+                featurePanelBasicPage,
+                featurePanelRepositoryPage,
+                featurePanelLogPage,
+                featurePanelQueueStatusText,
+                featurePanelQueueLogText,
+                featurePanelPauseResumeButton,
+                featurePanelCancelButton,
+                featurePanelDailyDutyRunButton,
+                featurePanelStartSelectedButton
+        );
 
         featurePanelConcurrencyInput.setText(String.valueOf(getSavedPanelConcurrency()));
         featurePanelRequestIntervalInput.setText(String.valueOf(getSavedPanelRequestInterval()));
@@ -2005,6 +2021,7 @@ public class MainActivity extends AppCompatActivity {
         featurePanelRepositoryIgnoredContainer = null;
         featurePanelQueueStatusText = null;
         featurePanelQueueLogText = null;
+        featurePanelUiController.clear();
         featureCookieChoices.clear();
     }
 
@@ -2930,33 +2947,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void switchFeaturePanelTab(int tab) {
-        if (featurePanelCookiePage != null) {
-            featurePanelCookiePage.setVisibility(tab == FEATURE_PANEL_TAB_COOKIE ? View.VISIBLE : View.GONE);
-        }
-        if (featurePanelBasicPage != null) {
-            featurePanelBasicPage.setVisibility(tab == FEATURE_PANEL_TAB_BASIC ? View.VISIBLE : View.GONE);
-        }
-        if (featurePanelRepositoryPage != null) {
-            featurePanelRepositoryPage.setVisibility(tab == FEATURE_PANEL_TAB_REPOSITORY ? View.VISIBLE : View.GONE);
-        }
-        if (featurePanelLogPage != null) {
-            featurePanelLogPage.setVisibility(tab == FEATURE_PANEL_TAB_LOG ? View.VISIBLE : View.GONE);
-        }
-        updateFeaturePanelTabButtonState(featurePanelTabCookieButton, tab == FEATURE_PANEL_TAB_COOKIE);
-        updateFeaturePanelTabButtonState(featurePanelTabBasicButton, tab == FEATURE_PANEL_TAB_BASIC);
-        updateFeaturePanelTabButtonState(featurePanelTabRepositoryButton, tab == FEATURE_PANEL_TAB_REPOSITORY);
-        updateFeaturePanelTabButtonState(featurePanelTabLogButton, tab == FEATURE_PANEL_TAB_LOG);
-    }
-
-    private void updateFeaturePanelTabButtonState(Button button, boolean selected) {
-        if (button == null) {
-            return;
-        }
-        button.setEnabled(true);
-        button.setSelected(selected);
-        button.setAlpha(1.0f);
-        button.setBackgroundTintList(ColorStateList.valueOf(selected ? 0xFF2563EB : 0xFF9CA3AF));
-        button.setTextColor(0xFFFFFFFF);
+        featurePanelUiController.switchTab(
+                tab,
+                FEATURE_PANEL_TAB_COOKIE,
+                FEATURE_PANEL_TAB_BASIC,
+                FEATURE_PANEL_TAB_REPOSITORY,
+                FEATURE_PANEL_TAB_LOG
+        );
     }
 
     private boolean isPersistedCookieChoiceSelected(String selectionKey) {
@@ -3071,6 +3068,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderFeaturePanelQueueState(DutyRequestQueue.StateSnapshot snapshot) {
+        if (featurePanelUiController != null) {
+            featurePanelUiController.renderQueueState(snapshot);
+            return;
+        }
         if (snapshot == null) {
             return;
         }

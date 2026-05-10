@@ -1,4 +1,4 @@
-package com.oxgames.rufflewrapper.amf;
+package com.namina.flashbrowser.amf;
 
 /**
  * Marker for the AMF undefined value.

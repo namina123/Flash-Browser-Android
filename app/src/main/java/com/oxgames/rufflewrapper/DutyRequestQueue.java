@@ -1,4 +1,4 @@
-package com.oxgames.rufflewrapper;
+package com.namina.flashbrowser;
 
 import android.os.SystemClock;
 import android.text.TextUtils;

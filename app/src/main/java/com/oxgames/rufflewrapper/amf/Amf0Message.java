@@ -1,4 +1,4 @@
-package com.oxgames.rufflewrapper.amf;
+package com.namina.flashbrowser.amf;
 
 import java.util.ArrayList;
 import java.util.Collections;

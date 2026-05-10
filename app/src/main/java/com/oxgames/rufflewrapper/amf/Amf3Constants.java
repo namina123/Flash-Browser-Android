@@ -1,4 +1,4 @@
-package com.oxgames.rufflewrapper.amf;
+package com.namina.flashbrowser.amf;
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;

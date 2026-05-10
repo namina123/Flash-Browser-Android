@@ -1,4 +1,4 @@
-package com.oxgames.rufflewrapper.amf;
+package com.namina.flashbrowser.amf;
 
 /**
  * Wraps an AMF3 payload when transporting it inside an AMF0 envelope.

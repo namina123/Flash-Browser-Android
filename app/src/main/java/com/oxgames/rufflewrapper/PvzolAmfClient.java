@@ -1,13 +1,13 @@
-package com.oxgames.rufflewrapper;
+package com.namina.flashbrowser;
 
 import android.net.Uri;
 import android.text.TextUtils;
 
-import com.oxgames.rufflewrapper.amf.Amf0Body;
-import com.oxgames.rufflewrapper.amf.Amf0Message;
-import com.oxgames.rufflewrapper.amf.Amf3Object;
-import com.oxgames.rufflewrapper.amf.AmfCodec;
-import com.oxgames.rufflewrapper.amf.AsObject;
+import com.namina.flashbrowser.amf.Amf0Body;
+import com.namina.flashbrowser.amf.Amf0Message;
+import com.namina.flashbrowser.amf.Amf3Object;
+import com.namina.flashbrowser.amf.AmfCodec;
+import com.namina.flashbrowser.amf.AsObject;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
