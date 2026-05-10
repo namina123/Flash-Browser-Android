@@ -1,6 +1,6 @@
 package com.namina.flashbrowser;
 
-final class FeatureCookieChoice {
+public final class FeatureCookieChoice {
     String label;
     String subtitle;
     String pageUrl;

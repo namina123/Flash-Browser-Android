@@ -68,6 +68,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -208,6 +209,7 @@ public class MainActivity extends AppCompatActivity {
     private final FeaturePanelUiController featurePanelUiController = new FeaturePanelUiController();
     private FeaturePanelCookieController featurePanelCookieController;
     private FeaturePanelTaskController featurePanelTaskController;
+    private FeaturePanelRepositoryController featurePanelRepositoryController;
     private String pendingLegacyYoukiaSourceUrl;
     private String pendingLegacyYoukiaTargetUrl;
     private AlertDialog featurePanelDialog;
@@ -291,6 +293,11 @@ public class MainActivity extends AppCompatActivity {
         featurePanelCookieController = new FeaturePanelCookieController(this, preferenceStore, cookieProfileManager);
         featurePanelTaskController = new FeaturePanelTaskController(preferenceStore);
         warehouseRecordManager = new WarehouseRecordManager(this);
+        featurePanelRepositoryController = new FeaturePanelRepositoryController(
+                this,
+                preferenceStore,
+                warehouseRecordManager
+        );
         cookieProfileManager.ensureInitialized();
         dutyRequestQueue.setListener(snapshot -> runOnUiThread(() -> renderFeaturePanelQueueState(snapshot)));
 
@@ -384,6 +391,7 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         if (featurePanelDialog != null && featurePanelDialog.isShowing()) {
             refreshFeaturePanelCookieChoices();
+            featurePanelRepositoryController.render(featureCookieChoices);
             renderFeaturePanelQueueState(dutyRequestQueue.snapshot());
         }
     }
@@ -1928,6 +1936,21 @@ public class MainActivity extends AppCompatActivity {
                 featurePanelDailyDutyRunButton,
                 featurePanelStartSelectedButton
         );
+        featurePanelRepositoryController.bind(
+                featurePanelRepositoryHintText,
+                featurePanelRepositorySelectedTargetsText,
+                featurePanelRepositoryPickTargetsButton,
+                featurePanelRepositoryViewCookieText,
+                featurePanelRepositoryPickViewCookieButton,
+                featurePanelRepositoryRefreshButton,
+                featurePanelRepositoryRecordButton,
+                featurePanelRepositoryCompareButton,
+                featurePanelRepositoryIgnoreSelectedButton,
+                featurePanelRepositoryRemoveIgnoredButton,
+                featurePanelRepositoryCurrentContainer,
+                featurePanelRepositoryDeltaContainer,
+                featurePanelRepositoryIgnoredContainer
+        );
 
         featurePanelConcurrencyInput.setText(String.valueOf(getSavedPanelConcurrency()));
         featurePanelRequestIntervalInput.setText(String.valueOf(getSavedPanelRequestInterval()));
@@ -1940,13 +1963,27 @@ public class MainActivity extends AppCompatActivity {
         featurePanelTabRepositoryButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_REPOSITORY));
         featurePanelTabLogButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_LOG));
         featurePanelSelectAllCookiesButton.setOnClickListener(v -> selectAllFeaturePanelCookies());
-        featurePanelRepositoryPickTargetsButton.setOnClickListener(v -> showRepositoryTargetPickerDialogV2());
-        featurePanelRepositoryPickViewCookieButton.setOnClickListener(v -> showRepositoryViewPickerDialogV2());
-        featurePanelRepositoryRefreshButton.setOnClickListener(v -> refreshRepositoryForSelectedTargets());
-        featurePanelRepositoryRecordButton.setOnClickListener(v -> recordRepositoryForSelectedTargets());
-        featurePanelRepositoryCompareButton.setOnClickListener(v -> compareRepositoryForSelectedTargets());
-        featurePanelRepositoryIgnoreSelectedButton.setOnClickListener(v -> addSelectedRepositoryDeltasToIgnored());
-        featurePanelRepositoryRemoveIgnoredButton.setOnClickListener(v -> removeSelectedRepositoryIgnoredItems());
+        featurePanelRepositoryPickTargetsButton.setOnClickListener(
+                v -> featurePanelRepositoryController.showTargetPickerDialog(featureCookieChoices)
+        );
+        featurePanelRepositoryPickViewCookieButton.setOnClickListener(
+                v -> featurePanelRepositoryController.showViewPickerDialog(featureCookieChoices)
+        );
+        featurePanelRepositoryRefreshButton.setOnClickListener(
+                v -> featurePanelRepositoryController.refreshSelectedTargets(featureCookieChoices)
+        );
+        featurePanelRepositoryRecordButton.setOnClickListener(
+                v -> featurePanelRepositoryController.recordSelectedTargets(featureCookieChoices)
+        );
+        featurePanelRepositoryCompareButton.setOnClickListener(
+                v -> featurePanelRepositoryController.compareSelectedTargets(featureCookieChoices)
+        );
+        featurePanelRepositoryIgnoreSelectedButton.setOnClickListener(
+                v -> featurePanelRepositoryController.addSelectedDeltasToIgnored(featureCookieChoices)
+        );
+        featurePanelRepositoryRemoveIgnoredButton.setOnClickListener(
+                v -> featurePanelRepositoryController.removeSelectedIgnoredItems(featureCookieChoices)
+        );
         featurePanelPauseResumeButton.setOnClickListener(v -> {
             DutyRequestQueue.StateSnapshot snapshot = dutyRequestQueue.snapshot();
             if (snapshot.running && !snapshot.paused) {
@@ -1974,8 +2011,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         refreshFeaturePanelCookieChoices();
-        refreshRepositorySelectionState();
-        renderRepositoryPanelV2();
+        featurePanelRepositoryController.render(featureCookieChoices);
         switchFeaturePanelTab(FEATURE_PANEL_TAB_COOKIE);
         renderFeaturePanelQueueState(dutyRequestQueue.snapshot());
     }
@@ -2026,6 +2062,7 @@ public class MainActivity extends AppCompatActivity {
         featurePanelQueueStatusText = null;
         featurePanelQueueLogText = null;
         featurePanelUiController.clear();
+        featurePanelRepositoryController.clear();
         featureCookieChoices.clear();
     }
 
@@ -2112,6 +2149,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onFeaturePanelCookieChoicesChanged() {
+        if (featurePanelRepositoryController != null) {
+            featurePanelRepositoryController.render(featureCookieChoices);
+            return;
+        }
         refreshRepositorySelectionState();
         renderRepositoryPanelV2();
     }
@@ -2120,6 +2161,9 @@ public class MainActivity extends AppCompatActivity {
         if (featurePanelCookieController != null) {
             featurePanelCookieController.selectAll(featureCookieChoices);
             refreshFeaturePanelCookieChoices();
+            if (featurePanelRepositoryController != null) {
+                featurePanelRepositoryController.render(featureCookieChoices);
+            }
             return;
         }
         if (featureCookieChoices.isEmpty()) {
@@ -3011,6 +3055,36 @@ public class MainActivity extends AppCompatActivity {
         if (featurePanelConcurrencyInput == null
                 || featurePanelRequestIntervalInput == null
                 || featurePanelFrequentRetryIntervalInput == null) {
+            return;
+        }
+        if (featurePanelTaskController != null) {
+            if (dutyRequestQueue.isBusy()) {
+                Toast.makeText(this, "璇锋眰闃熷垪姝ｅ湪杩愯锛岃鍏堟殏鍋滄垨缁堟銆?", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            boolean dailyDutyChecked = featurePanelDailyDutyCheckBox != null && featurePanelDailyDutyCheckBox.isChecked();
+            FeaturePanelTaskController.BuildResult buildResult = featurePanelTaskController.buildStartRequest(
+                    featureCookieChoices,
+                    featurePanelConcurrencyInput.getText().toString(),
+                    featurePanelRequestIntervalInput.getText().toString(),
+                    featurePanelFrequentRetryIntervalInput.getText().toString(),
+                    dailyDutyChecked,
+                    startCheckedItemsOnly
+            );
+            featurePanelConcurrencyInput.setText(String.valueOf(getSavedPanelConcurrency()));
+            featurePanelRequestIntervalInput.setText(String.valueOf(getSavedPanelRequestInterval()));
+            featurePanelFrequentRetryIntervalInput.setText(String.valueOf(getSavedPanelFrequentRetryInterval()));
+            if (buildResult.errorMessage != null) {
+                Toast.makeText(this, buildResult.errorMessage, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            FeaturePanelTaskController.StartRequest request = buildResult.request;
+            dutyRequestQueue.startDailyDutyRewards(
+                    request.targets,
+                    request.concurrency,
+                    request.requestIntervalMs,
+                    request.frequentRetryIntervalMs
+            );
             return;
         }
         if (featurePanelTaskController != null && !dutyRequestQueue.isBusy()) {
@@ -3907,4 +3981,632 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+}
+
+final class FeaturePanelRepositoryController {
+    private final AppCompatActivity activity;
+    private final BrowserPreferenceStore preferenceStore;
+    private final WarehouseRecordManager warehouseRecordManager;
+
+    private final LinkedHashSet<String> sessionRecordChoiceKeys = new LinkedHashSet<>();
+    private final HashMap<String, WarehouseRecordManager.RepositorySnapshot> currentSnapshots = new HashMap<>();
+    private final HashMap<String, LinkedHashSet<Integer>> selectedDeltaIds = new HashMap<>();
+    private final HashMap<String, LinkedHashSet<Integer>> selectedIgnoredIds = new HashMap<>();
+
+    private TextView repositoryHintText;
+    private TextView repositorySelectedTargetsText;
+    private Button repositoryPickTargetsButton;
+    private TextView repositoryViewCookieText;
+    private Button repositoryPickViewCookieButton;
+    private Button repositoryRefreshButton;
+    private Button repositoryRecordButton;
+    private Button repositoryCompareButton;
+    private Button repositoryIgnoreSelectedButton;
+    private Button repositoryRemoveIgnoredButton;
+    private LinearLayout repositoryCurrentContainer;
+    private LinearLayout repositoryDeltaContainer;
+    private LinearLayout repositoryIgnoredContainer;
+
+    private String sessionViewChoiceKey;
+    private boolean sessionRecordSelectionInitialized;
+    private boolean currentExpanded;
+
+    FeaturePanelRepositoryController(
+            AppCompatActivity activity,
+            BrowserPreferenceStore preferenceStore,
+            WarehouseRecordManager warehouseRecordManager
+    ) {
+        this.activity = activity;
+        this.preferenceStore = preferenceStore;
+        this.warehouseRecordManager = warehouseRecordManager;
+    }
+
+    void bind(
+            TextView repositoryHintText,
+            TextView repositorySelectedTargetsText,
+            Button repositoryPickTargetsButton,
+            TextView repositoryViewCookieText,
+            Button repositoryPickViewCookieButton,
+            Button repositoryRefreshButton,
+            Button repositoryRecordButton,
+            Button repositoryCompareButton,
+            Button repositoryIgnoreSelectedButton,
+            Button repositoryRemoveIgnoredButton,
+            LinearLayout repositoryCurrentContainer,
+            LinearLayout repositoryDeltaContainer,
+            LinearLayout repositoryIgnoredContainer
+    ) {
+        this.repositoryHintText = repositoryHintText;
+        this.repositorySelectedTargetsText = repositorySelectedTargetsText;
+        this.repositoryPickTargetsButton = repositoryPickTargetsButton;
+        this.repositoryViewCookieText = repositoryViewCookieText;
+        this.repositoryPickViewCookieButton = repositoryPickViewCookieButton;
+        this.repositoryRefreshButton = repositoryRefreshButton;
+        this.repositoryRecordButton = repositoryRecordButton;
+        this.repositoryCompareButton = repositoryCompareButton;
+        this.repositoryIgnoreSelectedButton = repositoryIgnoreSelectedButton;
+        this.repositoryRemoveIgnoredButton = repositoryRemoveIgnoredButton;
+        this.repositoryCurrentContainer = repositoryCurrentContainer;
+        this.repositoryDeltaContainer = repositoryDeltaContainer;
+        this.repositoryIgnoredContainer = repositoryIgnoredContainer;
+    }
+
+    void clear() {
+        bind(null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    void render(List<FeatureCookieChoice> choices) {
+        if (repositorySelectedTargetsText == null
+                || repositoryViewCookieText == null
+                || repositoryCurrentContainer == null
+                || repositoryDeltaContainer == null
+                || repositoryIgnoredContainer == null) {
+            return;
+        }
+
+        refreshSelectionState(choices);
+        List<FeatureCookieChoice> selectedChoices = getSelectedChoices(choices);
+        if (selectedChoices.isEmpty()) {
+            currentExpanded = false;
+            repositorySelectedTargetsText.setText("当前未选择记录目标");
+            repositoryViewCookieText.setText("当前未选择查看目标");
+            if (repositoryHintText != null) {
+                repositoryHintText.setText("仓库记录按 Cookie 分开保存。请先选择记录 Cookie。");
+            }
+            renderMessage(repositoryCurrentContainer, "当前未选择记录目标");
+            renderMessage(repositoryDeltaContainer, "当前未选择记录目标");
+            renderMessage(repositoryIgnoredContainer, "当前未选择记录目标");
+            updateButtonsEnabled(false);
+            return;
+        }
+
+        ArrayList<String> labels = new ArrayList<>();
+        for (FeatureCookieChoice choice : selectedChoices) {
+            labels.add(getChoiceLabel(choice));
+        }
+        repositorySelectedTargetsText.setText("记录目标：" + TextUtils.join("，", labels));
+
+        FeatureCookieChoice viewedChoice = getViewedChoice(choices);
+        if (viewedChoice == null) {
+            viewedChoice = selectedChoices.get(0);
+            sessionViewChoiceKey = getChoiceKey(viewedChoice);
+        }
+        repositoryViewCookieText.setText("当前查看：" + getChoiceLabel(viewedChoice));
+        if (repositoryHintText != null) {
+            repositoryHintText.setText("记录、对比和屏蔽都按各自 Cookie 分开保存。");
+        }
+        updateButtonsEnabled(true);
+        renderChoiceData(viewedChoice);
+    }
+
+    void showTargetPickerDialog(List<FeatureCookieChoice> choices) {
+        List<FeatureCookieChoice> availableChoices = new ArrayList<>(choices);
+        if (availableChoices.isEmpty()) {
+            Toast.makeText(activity, "当前没有可用的 Cookie。", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] labels = new String[availableChoices.size()];
+        boolean[] checked = new boolean[availableChoices.size()];
+        for (int i = 0; i < availableChoices.size(); i += 1) {
+            FeatureCookieChoice choice = availableChoices.get(i);
+            labels[i] = getChoiceLabel(choice);
+            checked[i] = sessionRecordChoiceKeys.contains(getChoiceKey(choice));
+        }
+
+        new AlertDialog.Builder(activity)
+                .setTitle("选择记录 Cookie")
+                .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) -> {
+                    String key = getChoiceKey(availableChoices.get(which));
+                    if (isChecked) {
+                        sessionRecordChoiceKeys.add(key);
+                    } else {
+                        sessionRecordChoiceKeys.remove(key);
+                    }
+                })
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    refreshSelectionState(choices);
+                    currentExpanded = false;
+                    render(choices);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    void showViewPickerDialog(List<FeatureCookieChoice> choices) {
+        List<FeatureCookieChoice> selectedChoices = getSelectedChoices(choices);
+        if (selectedChoices.isEmpty()) {
+            Toast.makeText(activity, "请先选择记录 Cookie。", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] labels = new String[selectedChoices.size()];
+        int checkedIndex = 0;
+        for (int i = 0; i < selectedChoices.size(); i += 1) {
+            FeatureCookieChoice choice = selectedChoices.get(i);
+            labels[i] = getChoiceLabel(choice);
+            if (TextUtils.equals(sessionViewChoiceKey, getChoiceKey(choice))) {
+                checkedIndex = i;
+            }
+        }
+
+        final int[] selectedIndex = new int[] {checkedIndex};
+        new AlertDialog.Builder(activity)
+                .setTitle("选择查看 Cookie")
+                .setSingleChoiceItems(labels, checkedIndex, (dialog, which) -> selectedIndex[0] = which)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    sessionViewChoiceKey = getChoiceKey(selectedChoices.get(selectedIndex[0]));
+                    currentExpanded = false;
+                    render(choices);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    void refreshSelectedTargets(List<FeatureCookieChoice> choices) {
+        executeBatchAction("refresh", choices);
+    }
+
+    void recordSelectedTargets(List<FeatureCookieChoice> choices) {
+        executeBatchAction("record", choices);
+    }
+
+    void compareSelectedTargets(List<FeatureCookieChoice> choices) {
+        executeBatchAction("compare", choices);
+    }
+
+    void addSelectedDeltasToIgnored(List<FeatureCookieChoice> choices) {
+        FeatureCookieChoice viewedChoice = getViewedChoice(choices);
+        if (viewedChoice == null) {
+            return;
+        }
+        String key = getChoiceKey(viewedChoice);
+        LinkedHashSet<Integer> ids = selectedDeltaIds.get(key);
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        LinkedHashSet<Integer> ignoredIds = loadIgnoredIds(key);
+        ignoredIds.addAll(ids);
+        saveIgnoredIds(key, ignoredIds);
+        ids.clear();
+        render(choices);
+    }
+
+    void removeSelectedIgnoredItems(List<FeatureCookieChoice> choices) {
+        FeatureCookieChoice viewedChoice = getViewedChoice(choices);
+        if (viewedChoice == null) {
+            return;
+        }
+        String key = getChoiceKey(viewedChoice);
+        LinkedHashSet<Integer> ids = selectedIgnoredIds.get(key);
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        LinkedHashSet<Integer> ignoredIds = loadIgnoredIds(key);
+        ignoredIds.removeAll(ids);
+        saveIgnoredIds(key, ignoredIds);
+        ids.clear();
+        render(choices);
+    }
+
+    private void executeBatchAction(String action, List<FeatureCookieChoice> choices) {
+        List<FeatureCookieChoice> targets = getSelectedChoices(choices);
+        if (targets.isEmpty()) {
+            Toast.makeText(activity, "请先选择记录 Cookie。", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        setActionButtonsEnabled(false);
+        new Thread(() -> {
+            ArrayList<String> messages = new ArrayList<>();
+            for (FeatureCookieChoice choice : targets) {
+                String key = getChoiceKey(choice);
+                String label = getChoiceLabel(choice);
+                try {
+                    WarehouseRecordManager.RepositorySnapshot snapshot =
+                            warehouseRecordManager.fetchRepository(choice.baseUrl, choice.cookies);
+                    currentSnapshots.put(key, snapshot);
+                    if ("record".equals(action)) {
+                        saveRecordedSnapshot(key, snapshot);
+                        messages.add(label + "：已记录");
+                    } else if ("compare".equals(action)) {
+                        messages.add(label + "：已对比");
+                    } else {
+                        messages.add(label + "：已刷新");
+                    }
+                } catch (Exception e) {
+                    messages.add(label + "：失败，" + e.getMessage());
+                }
+            }
+
+            activity.runOnUiThread(() -> {
+                setActionButtonsEnabled(true);
+                if (repositoryHintText != null && !messages.isEmpty()) {
+                    repositoryHintText.setText(TextUtils.join(" | ", messages));
+                }
+                render(choices);
+            });
+        }).start();
+    }
+
+    private void refreshSelectionState(List<FeatureCookieChoice> choices) {
+        List<FeatureCookieChoice> availableChoices = new ArrayList<>(choices);
+        LinkedHashSet<String> availableKeys = new LinkedHashSet<>();
+        for (FeatureCookieChoice choice : availableChoices) {
+            availableKeys.add(getChoiceKey(choice));
+        }
+        sessionRecordChoiceKeys.retainAll(availableKeys);
+        if (!sessionRecordSelectionInitialized) {
+            sessionRecordSelectionInitialized = true;
+            for (FeatureCookieChoice choice : availableChoices) {
+                if (choice.currentPage) {
+                    sessionRecordChoiceKeys.add(getChoiceKey(choice));
+                    break;
+                }
+            }
+            if (sessionRecordChoiceKeys.isEmpty() && !availableChoices.isEmpty()) {
+                sessionRecordChoiceKeys.add(getChoiceKey(availableChoices.get(0)));
+            }
+        }
+
+        if (TextUtils.isEmpty(sessionViewChoiceKey)
+                || !sessionRecordChoiceKeys.contains(sessionViewChoiceKey)) {
+            sessionViewChoiceKey = sessionRecordChoiceKeys.isEmpty()
+                    ? null
+                    : sessionRecordChoiceKeys.iterator().next();
+        }
+    }
+
+    private List<FeatureCookieChoice> getSelectedChoices(List<FeatureCookieChoice> choices) {
+        ArrayList<FeatureCookieChoice> result = new ArrayList<>();
+        for (FeatureCookieChoice choice : choices) {
+            if (sessionRecordChoiceKeys.contains(getChoiceKey(choice))) {
+                result.add(choice);
+            }
+        }
+        return result;
+    }
+
+    private FeatureCookieChoice getViewedChoice(List<FeatureCookieChoice> choices) {
+        if (TextUtils.isEmpty(sessionViewChoiceKey)) {
+            return null;
+        }
+        for (FeatureCookieChoice choice : choices) {
+            if (sessionViewChoiceKey.equals(getChoiceKey(choice))) {
+                return choice;
+            }
+        }
+        return null;
+    }
+
+    private String getChoiceKey(FeatureCookieChoice choice) {
+        if (choice == null) {
+            return "";
+        }
+        if (!TextUtils.isEmpty(choice.selectionKey)) {
+            return "profile:" + choice.selectionKey;
+        }
+        return "current:" + choice.baseUrl + ":" + Integer.toHexString(String.valueOf(choice.cookies).hashCode());
+    }
+
+    private String getChoiceLabel(FeatureCookieChoice choice) {
+        if (choice == null) {
+            return "";
+        }
+        return choice.currentPage ? "当前页面 Cookie" : choice.label;
+    }
+
+    private void renderChoiceData(FeatureCookieChoice choice) {
+        String key = getChoiceKey(choice);
+        WarehouseRecordManager.RepositorySnapshot currentSnapshot = currentSnapshots.get(key);
+        if (currentSnapshot == null) {
+            renderMessage(repositoryCurrentContainer, "尚未刷新当前仓库。");
+        } else {
+            renderCurrentSnapshot(currentSnapshot);
+        }
+
+        WarehouseRecordManager.RepositorySnapshot recordedSnapshot = loadRecordedSnapshot(key);
+        LinkedHashSet<Integer> ignoredIds = loadIgnoredIds(key);
+        if (recordedSnapshot == null || currentSnapshot == null) {
+            renderMessage(repositoryDeltaContainer, "请先刷新仓库并至少记录一次。");
+        } else {
+            renderDeltas(key, warehouseRecordManager.compare(currentSnapshot, recordedSnapshot, ignoredIds));
+        }
+        renderIgnoredList(key, ignoredIds);
+    }
+
+    private void renderCurrentSnapshot(WarehouseRecordManager.RepositorySnapshot snapshot) {
+        repositoryCurrentContainer.removeAllViews();
+        if (snapshot == null || snapshot.toolEntries.isEmpty()) {
+            renderMessage(repositoryCurrentContainer, "当前仓库为空。");
+            return;
+        }
+
+        final int collapsedLineCount = 8;
+        String fullText = buildSnapshotText(snapshot);
+        String[] lines = fullText.split("\n");
+        boolean canCollapse = lines.length > collapsedLineCount;
+        String shownText = fullText;
+        if (!currentExpanded && canCollapse) {
+            shownText = TextUtils.join("\n", Arrays.asList(lines).subList(0, collapsedLineCount));
+        }
+
+        TextView textView = new TextView(activity);
+        textView.setText(shownText);
+        textView.setTextColor(0xFF1F2937);
+        textView.setBackgroundColor(0xFFFFFFFF);
+        textView.setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12));
+        repositoryCurrentContainer.addView(textView);
+
+        if (canCollapse) {
+            Button toggleButton = new Button(activity);
+            toggleButton.setAllCaps(false);
+            toggleButton.setText(currentExpanded ? "收起" : "展开全部");
+            toggleButton.setOnClickListener(v -> {
+                currentExpanded = !currentExpanded;
+                renderCurrentSnapshot(snapshot);
+            });
+            repositoryCurrentContainer.addView(toggleButton);
+        }
+    }
+
+    private String buildSnapshotText(WarehouseRecordManager.RepositorySnapshot snapshot) {
+        StringBuilder builder = new StringBuilder();
+        for (WarehouseRecordManager.ToolEntry entry : snapshot.toolEntries) {
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(entry.displayName).append(" x ").append(entry.amount);
+        }
+        return builder.toString();
+    }
+
+    private void renderDeltas(String key, List<WarehouseRecordManager.RepositoryDelta> deltas) {
+        repositoryDeltaContainer.removeAllViews();
+        LinkedHashSet<Integer> ids = selectedDeltaIds.get(key);
+        if (ids == null) {
+            ids = new LinkedHashSet<>();
+            selectedDeltaIds.put(key, ids);
+        }
+        if (deltas == null || deltas.isEmpty()) {
+            renderMessage(repositoryDeltaContainer, "暂无变化。");
+            return;
+        }
+
+        LayoutInflater inflater = LayoutInflater.from(activity);
+        for (WarehouseRecordManager.RepositoryDelta delta : deltas) {
+            View itemView = inflater.inflate(R.layout.item_panel_cookie_option, repositoryDeltaContainer, false);
+            CheckBox checkBox = itemView.findViewById(R.id.check_cookie_option);
+            TextView subtitle = itemView.findViewById(R.id.text_cookie_option_subtitle);
+            checkBox.setText(delta.displayName);
+            checkBox.setChecked(ids.contains(Integer.valueOf(delta.toolId)));
+            checkBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                LinkedHashSet<Integer> selectedIds = selectedDeltaIds.get(key);
+                if (selectedIds == null) {
+                    selectedIds = new LinkedHashSet<>();
+                    selectedDeltaIds.put(key, selectedIds);
+                }
+                if (isChecked) {
+                    selectedIds.add(Integer.valueOf(delta.toolId));
+                } else {
+                    selectedIds.remove(Integer.valueOf(delta.toolId));
+                }
+            });
+            subtitle.setText("变化：" + delta.deltaAmount + "，当前数量：" + delta.currentAmount);
+            repositoryDeltaContainer.addView(itemView);
+        }
+    }
+
+    private void renderIgnoredList(String key, LinkedHashSet<Integer> ignoredIds) {
+        repositoryIgnoredContainer.removeAllViews();
+        LinkedHashSet<Integer> ids = selectedIgnoredIds.get(key);
+        if (ids == null) {
+            ids = new LinkedHashSet<>();
+            selectedIgnoredIds.put(key, ids);
+        }
+        if (ignoredIds == null || ignoredIds.isEmpty()) {
+            renderMessage(repositoryIgnoredContainer, "暂无屏蔽物品。");
+            return;
+        }
+
+        LayoutInflater inflater = LayoutInflater.from(activity);
+        for (Integer toolId : ignoredIds) {
+            View itemView = inflater.inflate(R.layout.item_panel_cookie_option, repositoryIgnoredContainer, false);
+            CheckBox checkBox = itemView.findViewById(R.id.check_cookie_option);
+            TextView subtitle = itemView.findViewById(R.id.text_cookie_option_subtitle);
+            checkBox.setText(warehouseRecordManager.nameOf(toolId.intValue()));
+            checkBox.setChecked(ids.contains(toolId));
+            checkBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                LinkedHashSet<Integer> selectedIds = selectedIgnoredIds.get(key);
+                if (selectedIds == null) {
+                    selectedIds = new LinkedHashSet<>();
+                    selectedIgnoredIds.put(key, selectedIds);
+                }
+                if (isChecked) {
+                    selectedIds.add(toolId);
+                } else {
+                    selectedIds.remove(toolId);
+                }
+            });
+            subtitle.setText("物品 ID：" + toolId);
+            repositoryIgnoredContainer.addView(itemView);
+        }
+    }
+
+    private void renderMessage(LinearLayout container, String message) {
+        container.removeAllViews();
+        TextView textView = new TextView(activity);
+        textView.setText(message);
+        textView.setTextColor(0xFF4B5563);
+        textView.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8));
+        container.addView(textView);
+    }
+
+    private void updateButtonsEnabled(boolean enabled) {
+        if (repositoryPickViewCookieButton != null) {
+            repositoryPickViewCookieButton.setEnabled(enabled);
+        }
+        if (repositoryRefreshButton != null) {
+            repositoryRefreshButton.setEnabled(enabled);
+        }
+        if (repositoryRecordButton != null) {
+            repositoryRecordButton.setEnabled(enabled);
+        }
+        if (repositoryCompareButton != null) {
+            repositoryCompareButton.setEnabled(enabled);
+        }
+        if (repositoryIgnoreSelectedButton != null) {
+            repositoryIgnoreSelectedButton.setEnabled(enabled);
+        }
+        if (repositoryRemoveIgnoredButton != null) {
+            repositoryRemoveIgnoredButton.setEnabled(enabled);
+        }
+        setContentEnabled(repositoryCurrentContainer, enabled);
+        setContentEnabled(repositoryDeltaContainer, enabled);
+        setContentEnabled(repositoryIgnoredContainer, enabled);
+    }
+
+    private void setActionButtonsEnabled(boolean enabled) {
+        if (repositoryRefreshButton != null) {
+            repositoryRefreshButton.setEnabled(enabled);
+        }
+        if (repositoryRecordButton != null) {
+            repositoryRecordButton.setEnabled(enabled);
+        }
+        if (repositoryCompareButton != null) {
+            repositoryCompareButton.setEnabled(enabled);
+        }
+    }
+
+    private void setContentEnabled(View view, boolean enabled) {
+        if (view == null) {
+            return;
+        }
+        view.setEnabled(enabled);
+        view.setAlpha(enabled ? 1.0f : 0.42f);
+    }
+
+    private WarehouseRecordManager.RepositorySnapshot loadRecordedSnapshot(String key) {
+        try {
+            JSONObject root = new JSONObject(preferenceStore.getRepositoryRecordsJson());
+            JSONObject item = root.optJSONObject(key);
+            if (item == null) {
+                return null;
+            }
+            JSONObject snapshotObject = item.optJSONObject("snapshot");
+            if (snapshotObject == null) {
+                return null;
+            }
+            LinkedHashMap<Integer, Integer> toolAmounts = new LinkedHashMap<>();
+            java.util.Iterator<String> keys = snapshotObject.keys();
+            while (keys.hasNext()) {
+                String toolId = keys.next();
+                toolAmounts.put(
+                        Integer.valueOf(Integer.parseInt(toolId)),
+                        Integer.valueOf(snapshotObject.optInt(toolId, 0))
+                );
+            }
+            ArrayList<WarehouseRecordManager.ToolEntry> entries = new ArrayList<>();
+            for (Map.Entry<Integer, Integer> entry : toolAmounts.entrySet()) {
+                entries.add(new WarehouseRecordManager.ToolEntry(
+                        entry.getKey().intValue(),
+                        entry.getValue().intValue(),
+                        warehouseRecordManager.nameOf(entry.getKey().intValue())
+                ));
+            }
+            return new WarehouseRecordManager.RepositorySnapshot(toolAmounts, entries);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void saveRecordedSnapshot(String key, WarehouseRecordManager.RepositorySnapshot snapshot) {
+        if (TextUtils.isEmpty(key) || snapshot == null) {
+            return;
+        }
+        try {
+            JSONObject root = new JSONObject(preferenceStore.getRepositoryRecordsJson());
+            JSONObject item = root.optJSONObject(key);
+            if (item == null) {
+                item = new JSONObject();
+                root.put(key, item);
+            }
+            JSONObject snapshotObject = new JSONObject();
+            for (Map.Entry<Integer, Integer> entry : snapshot.toolAmounts.entrySet()) {
+                snapshotObject.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            item.put("snapshot", snapshotObject);
+            if (!item.has("ignored")) {
+                item.put("ignored", new JSONArray());
+            }
+            preferenceStore.setRepositoryRecordsJson(root.toString());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private LinkedHashSet<Integer> loadIgnoredIds(String key) {
+        LinkedHashSet<Integer> result = new LinkedHashSet<>();
+        try {
+            JSONObject root = new JSONObject(preferenceStore.getRepositoryRecordsJson());
+            JSONObject item = root.optJSONObject(key);
+            if (item == null) {
+                return result;
+            }
+            JSONArray ignored = item.optJSONArray("ignored");
+            if (ignored == null) {
+                return result;
+            }
+            for (int i = 0; i < ignored.length(); i += 1) {
+                result.add(Integer.valueOf(ignored.optInt(i)));
+            }
+        } catch (Exception ignored) {
+        }
+        return result;
+    }
+
+    private void saveIgnoredIds(String key, LinkedHashSet<Integer> ignoredIds) {
+        try {
+            JSONObject root = new JSONObject(preferenceStore.getRepositoryRecordsJson());
+            JSONObject item = root.optJSONObject(key);
+            if (item == null) {
+                item = new JSONObject();
+                root.put(key, item);
+            }
+            JSONArray ignored = new JSONArray();
+            for (Integer toolId : ignoredIds) {
+                ignored.put(toolId);
+            }
+            item.put("ignored", ignored);
+            if (!item.has("snapshot")) {
+                item.put("snapshot", new JSONObject());
+            }
+            preferenceStore.setRepositoryRecordsJson(root.toString());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private int dpToPx(int dp) {
+        float density = activity.getResources().getDisplayMetrics().density;
+        return Math.round(dp * density);
+    }
 }

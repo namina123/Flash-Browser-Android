@@ -6,7 +6,7 @@ import android.content.SharedPreferences;
 import java.util.HashSet;
 import java.util.Set;
 
-final class BrowserPreferenceStore {
+public final class BrowserPreferenceStore {
     private static final String PREFS_NAME = "browser_prefs";
     private static final String PREF_ORIENTATION = "orientation_mode";
     private static final String PREF_RUFFLE_FONT_MODE = "ruffle_font_mode";
