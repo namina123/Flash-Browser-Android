@@ -93,15 +93,6 @@ public class MainActivity extends AppCompatActivity {
     private static final int ORIENTATION_LANDSCAPE = 0;
     private static final int ORIENTATION_PORTRAIT = 1;
     private static final int ORIENTATION_SYSTEM = 2;
-    private static final int MENU_COOKIE_PROFILES = 100;
-    private static final int MENU_MAPPING_CONFIG = 101;
-    private static final int MENU_FONT_MODE_SANS = 102;
-    private static final int MENU_FONT_MODE_SERIF = 103;
-    private static final int MENU_FONT_MODE_EMBEDDED = 104;
-    private static final int MENU_MANUAL_TEST_DIRECT = 105;
-    private static final int MENU_MANUAL_TEST_PROXY = 106;
-    private static final int MENU_RUFFLE_DEBUG_DUMP = 107;
-    private static final int MENU_NAV_PVZ_YOUKIA = 108;
     private static final int FEATURE_PANEL_TAB_COOKIE = 0;
     private static final int FEATURE_PANEL_TAB_BASIC = 1;
     private static final int FEATURE_PANEL_TAB_REPOSITORY = 2;
@@ -112,7 +103,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String RUFFLE_PATH_PREFIX = "/__ruffle__/";
     private static final String PROXY_PATH_PREFIX = "/__proxy__/";
     private static final String BOOTSTRAP_SCRIPT = "bootstrap.js";
-    private static final String PVZ_YOUKIA_ENTRY_URL = "http://pvz.youkia.com/index.php";
     private static final long HOVER_HOLD_MS = 450L;
     private static final long MENU_HOLD_MS = 700L;
     private static final float TOUCH_HOLD_MOVE_TOLERANCE_DP = 18f;
@@ -205,6 +195,7 @@ public class MainActivity extends AppCompatActivity {
     private BrowserPreferenceStore preferenceStore;
     private LocalMappingManager localMappingManager;
     private CookieProfileManager cookieProfileManager;
+    private BrowserSettingsController browserSettingsController;
     private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
     private final FeaturePanelUiController featurePanelUiController = new FeaturePanelUiController();
     private FeaturePanelCookieController featurePanelCookieController;
@@ -283,6 +274,54 @@ public class MainActivity extends AppCompatActivity {
         localMappingManager = new LocalMappingManager(this);
         localMappingManager.initialize();
         cookieProfileManager = new CookieProfileManager(this);
+        browserSettingsController = new BrowserSettingsController(
+                this,
+                cookieProfileManager,
+                localMappingManager,
+                new BrowserSettingsController.Host() {
+                    @Override
+                    public void requestAllFilesAccessPermission() {
+                        MainActivity.this.requestAllFilesAccessPermission();
+                    }
+
+                    @Override
+                    public void updateUrlInput(String url) {
+                        MainActivity.this.updateUrlInput(url);
+                    }
+
+                    @Override
+                    public void loadUrl(String url) {
+                        MainActivity.this.loadUrl(url);
+                    }
+
+                    @Override
+                    public void onOrientationSelected(int mode) {
+                        saveOrientation(mode);
+                        applyOrientation(mode);
+                    }
+
+                    @Override
+                    public int getSelectedFontMode() {
+                        return getSavedFontMode();
+                    }
+
+                    @Override
+                    public void onFontModeSelected(int mode) {
+                        saveFontMode(mode);
+                        reloadCurrentPageForFontMode();
+                    }
+
+                    @Override
+                    public String getCurrentPageUrl() {
+                        return wrapper == null ? null : wrapper.getUrl();
+                    }
+
+                    @Override
+                    public String getCurrentPageTitle() {
+                        return wrapper == null ? null : wrapper.getTitle();
+                    }
+                }
+        );
         featurePanelCookieController = new FeaturePanelCookieController(this, preferenceStore, cookieProfileManager);
         featurePanelTaskController = new FeaturePanelTaskController(preferenceStore);
         warehouseRecordManager = new WarehouseRecordManager(this);
@@ -344,7 +383,7 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btn_refresh).setOnClickListener(v -> wrapper.reload());
         findViewById(R.id.btn_go).setOnClickListener(v -> showFeaturePanelDialog());
         findViewById(R.id.btn_fullscreen).setOnClickListener(v -> toggleRuffleFullscreenCompat());
-        findViewById(R.id.btn_save_cookie).setOnClickListener(v -> saveCurrentCookieProfile());
+        findViewById(R.id.btn_save_cookie).setOnClickListener(v -> browserSettingsController.saveCurrentCookieProfile());
         fullscreenFeaturePanelButton.setOnClickListener(v -> toggleFeaturePanelDialog());
         legacyYoukiaRedirectButton.setOnClickListener(v -> performPendingLegacyYoukiaRedirect());
         fullscreenRotateButton.setOnClickListener(v -> rotateFullscreenOrientation());
@@ -355,7 +394,7 @@ public class MainActivity extends AppCompatActivity {
                 toggleRuffleFullscreenCompat();
             }
         });
-        findViewById(R.id.btn_settings).setOnClickListener(this::showSettingsMenu);
+        findViewById(R.id.btn_settings).setOnClickListener(browserSettingsController::showSettingsMenu);
 
         urlInput.setOnEditorActionListener((v, actionId, event) -> {
             boolean enterPressed = event != null
@@ -1698,181 +1737,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void saveCurrentCookieProfile() {
-        if (!cookieProfileManager.canAccessRootDirectory()) {
-            Toast.makeText(this, R.string.cookie_storage_permission_needed, Toast.LENGTH_LONG).show();
-            requestAllFilesAccessPermission();
-            return;
-        }
-
-        String currentUrl = wrapper == null ? null : wrapper.getUrl();
-        if (TextUtils.isEmpty(currentUrl)) {
-            Toast.makeText(this, "No page to save cookie from", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        Uri currentUri = Uri.parse(currentUrl);
-        if (!CookieProfileManager.isSupportedSavePage(currentUri)) {
-            Toast.makeText(this, "Current page cannot be saved as a cookie profile", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        String cookies = CookieManager.getInstance().getCookie(currentUrl);
-        if (TextUtils.isEmpty(cookies)) {
-            Toast.makeText(this, "Current page has no cookies", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        File savedFile = cookieProfileManager.saveProfileFromPage(currentUri, cookies, wrapper.getTitle());
-        if (savedFile == null) {
-            Toast.makeText(this, "Failed to save cookie", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        Toast.makeText(this, "Saved cookie: " + savedFile.getName(), Toast.LENGTH_SHORT).show();
-    }
-
-    private void showSettingsMenu(View anchor) {
-        PopupMenu menu = new PopupMenu(this, anchor);
-        int fontMode = getSavedFontMode();
-        menu.getMenu().add(0, MENU_COOKIE_PROFILES, 0, getString(R.string.cookie_profiles));
-        menu.getMenu().add(0, MENU_FONT_MODE_SANS, 1, buildFontMenuTitle(fontMode, FONT_MODE_CHINESE_SANS, "Ruffle 字体: 中文无衬线"));
-        menu.getMenu().add(0, MENU_FONT_MODE_SERIF, 2, buildFontMenuTitle(fontMode, FONT_MODE_CHINESE_SERIF, "Ruffle 字体: 中文衬线"));
-        menu.getMenu().add(0, MENU_FONT_MODE_EMBEDDED, 3, buildFontMenuTitle(fontMode, FONT_MODE_EMBEDDED, "Ruffle 字体: 关闭设备字体"));
-        menu.getMenu().add(0, ORIENTATION_LANDSCAPE, 4, getString(R.string.orientation_landscape));
-        menu.getMenu().add(0, ORIENTATION_PORTRAIT, 5, getString(R.string.orientation_portrait));
-        menu.getMenu().add(0, ORIENTATION_SYSTEM, 6, getString(R.string.orientation_system));
-        menu.getMenu().add(0, MENU_MAPPING_CONFIG, 7, getString(R.string.mapping_config_path));
-        menu.getMenu().add(0, MENU_NAV_PVZ_YOUKIA, 8, "导航到 pvz.youkia.com");
-        menu.setOnMenuItemClickListener(item -> {
-            if (item.getItemId() == MENU_COOKIE_PROFILES) {
-                showCookieProfilesDialog();
-                return true;
-            }
-            if (item.getItemId() == MENU_FONT_MODE_SANS) {
-                saveFontMode(FONT_MODE_CHINESE_SANS);
-                reloadCurrentPageForFontMode();
-                return true;
-            }
-            if (item.getItemId() == MENU_FONT_MODE_SERIF) {
-                saveFontMode(FONT_MODE_CHINESE_SERIF);
-                reloadCurrentPageForFontMode();
-                return true;
-            }
-            if (item.getItemId() == MENU_FONT_MODE_EMBEDDED) {
-                saveFontMode(FONT_MODE_EMBEDDED);
-                reloadCurrentPageForFontMode();
-                return true;
-            }
-            if (item.getItemId() == MENU_MAPPING_CONFIG) {
-                Toast.makeText(this, localMappingManager.getConfigFile().getAbsolutePath(), Toast.LENGTH_LONG).show();
-                return true;
-            }
-            if (item.getItemId() == MENU_NAV_PVZ_YOUKIA) {
-                loadUrl(PVZ_YOUKIA_ENTRY_URL);
-                return true;
-            }
-            saveOrientation(item.getItemId());
-            applyOrientation(item.getItemId());
-            return true;
-        });
-        menu.show();
-    }
-
-    private void showCookieProfilesDialog() {
-        if (!cookieProfileManager.canAccessRootDirectory()) {
-            Toast.makeText(this, R.string.cookie_storage_permission_needed, Toast.LENGTH_LONG).show();
-            requestAllFilesAccessPermission();
-            return;
-        }
-
-        if (!cookieProfileManager.ensureInitialized()) {
-            Toast.makeText(this, R.string.cookie_copy_failed, Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        List<CookieProfileManager.CookieProfile> profiles = cookieProfileManager.loadProfiles();
-        if (profiles.isEmpty()) {
-            Toast.makeText(this, R.string.cookie_no_profiles, Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_cookie_profiles, null);
-        LinearLayout container = dialogView.findViewById(R.id.cookie_profile_container);
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.cookie_profile_title)
-                .setView(dialogView)
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
-
-        renderCookieProfiles(container, profiles, dialog);
-
-        File cookieDir = cookieProfileManager.getRootDirectory();
-        FileObserver observer = new FileObserver(cookieDir.getAbsolutePath(),
-                FileObserver.CREATE
-                        | FileObserver.CLOSE_WRITE
-                        | FileObserver.MOVED_TO
-                        | FileObserver.DELETE
-                        | FileObserver.MOVED_FROM) {
-            @Override
-            public void onEvent(int event, String path) {
-                runOnUiThread(() -> {
-                    if (!dialog.isShowing()) {
-                        return;
-                    }
-                    renderCookieProfiles(container, cookieProfileManager.loadProfiles(), dialog);
-                });
-            }
-        };
-        dialog.setOnShowListener(dialogInterface -> observer.startWatching());
-        dialog.setOnDismissListener(dialogInterface -> observer.stopWatching());
-
-        dialog.show();
-    }
-
-    private void renderCookieProfiles(
-            LinearLayout container,
-            List<CookieProfileManager.CookieProfile> profiles,
-            AlertDialog dialog
-    ) {
-        container.removeAllViews();
-        if (profiles.isEmpty()) {
-            TextView emptyView = new TextView(this);
-            emptyView.setText(R.string.cookie_no_profiles);
-            emptyView.setTextColor(0xFF374151);
-            emptyView.setPadding(8, 8, 8, 8);
-            container.addView(emptyView);
-            return;
-        }
-
-        for (CookieProfileManager.CookieProfile profile : profiles) {
-            View itemView = LayoutInflater.from(this).inflate(R.layout.item_cookie_profile, container, false);
-            TextView fileName = itemView.findViewById(R.id.text_file_name);
-            TextView userName = itemView.findViewById(R.id.text_user_name);
-            fileName.setText(getString(R.string.cookie_file_name, profile.file.getName()));
-            userName.setText(getString(R.string.cookie_user_name, profile.userName));
-            itemView.findViewById(R.id.btn_apply_cookie).setOnClickListener(v -> {
-                dialog.dismiss();
-                applyCookieProfile(profile);
-            });
-            container.addView(itemView);
-        }
-    }
-
-    private void applyCookieProfile(CookieProfileManager.CookieProfile profile) {
-        String targetUrl = CookieProfileManager.buildTargetUrl(profile);
-        CookieManager cookieManager = CookieManager.getInstance();
-        cookieManager.setAcceptCookie(true);
-        cookieManager.setCookie(profile.userDomain, profile.userCookies);
-        cookieManager.setCookie(targetUrl, profile.userCookies);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            cookieManager.flush();
-        }
-        updateUrlInput(targetUrl);
-        loadUrl(targetUrl);
-        Toast.makeText(this, R.string.cookie_applied, Toast.LENGTH_SHORT).show();
-    }
-
     private void showFeaturePanelDialog() {
         if (featurePanelDialog != null && featurePanelDialog.isShowing()) {
             return;
@@ -2263,10 +2127,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void saveFontMode(int mode) {
         preferenceStore.setFontMode(mode);
-    }
-
-    private String buildFontMenuTitle(int currentMode, int itemMode, String label) {
-        return (currentMode == itemMode ? "✓ " : "") + label;
     }
 
     private void reloadCurrentPageForFontMode() {
@@ -3584,5 +3444,239 @@ final class FeaturePanelRepositoryController {
     private int dpToPx(int dp) {
         float density = activity.getResources().getDisplayMetrics().density;
         return Math.round(dp * density);
+    }
+}
+
+final class BrowserSettingsController {
+    interface Host {
+        void requestAllFilesAccessPermission();
+
+        void updateUrlInput(String url);
+
+        void loadUrl(String url);
+
+        void onOrientationSelected(int mode);
+
+        int getSelectedFontMode();
+
+        void onFontModeSelected(int mode);
+
+        String getCurrentPageUrl();
+
+        String getCurrentPageTitle();
+    }
+
+    private static final int MENU_COOKIE_PROFILES = 100;
+    private static final int MENU_MAPPING_CONFIG = 101;
+    private static final int MENU_FONT_MODE_SANS = 102;
+    private static final int MENU_FONT_MODE_SERIF = 103;
+    private static final int MENU_FONT_MODE_EMBEDDED = 104;
+    private static final int MENU_NAV_PVZ_YOUKIA = 108;
+
+    private static final int ORIENTATION_LANDSCAPE = 0;
+    private static final int ORIENTATION_PORTRAIT = 1;
+    private static final int ORIENTATION_SYSTEM = 2;
+
+    private static final int FONT_MODE_CHINESE_SANS = 0;
+    private static final int FONT_MODE_CHINESE_SERIF = 1;
+    private static final int FONT_MODE_EMBEDDED = 2;
+
+    private static final String PVZ_YOUKIA_ENTRY_URL = "http://pvz.youkia.com/index.php";
+
+    private final AppCompatActivity activity;
+    private final CookieProfileManager cookieProfileManager;
+    private final LocalMappingManager localMappingManager;
+    private final Host host;
+
+    BrowserSettingsController(
+            AppCompatActivity activity,
+            CookieProfileManager cookieProfileManager,
+            LocalMappingManager localMappingManager,
+            Host host
+    ) {
+        this.activity = activity;
+        this.cookieProfileManager = cookieProfileManager;
+        this.localMappingManager = localMappingManager;
+        this.host = host;
+    }
+
+    void saveCurrentCookieProfile() {
+        if (!cookieProfileManager.canAccessRootDirectory()) {
+            Toast.makeText(activity, R.string.cookie_storage_permission_needed, Toast.LENGTH_LONG).show();
+            host.requestAllFilesAccessPermission();
+            return;
+        }
+
+        String currentUrl = host.getCurrentPageUrl();
+        if (TextUtils.isEmpty(currentUrl)) {
+            Toast.makeText(activity, "No page to save cookie from", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Uri currentUri = Uri.parse(currentUrl);
+        if (!CookieProfileManager.isSupportedSavePage(currentUri)) {
+            Toast.makeText(activity, "Current page cannot be saved as a cookie profile", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String cookies = CookieManager.getInstance().getCookie(currentUrl);
+        if (TextUtils.isEmpty(cookies)) {
+            Toast.makeText(activity, "Current page has no cookies", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        File savedFile = cookieProfileManager.saveProfileFromPage(
+                currentUri,
+                cookies,
+                host.getCurrentPageTitle()
+        );
+        if (savedFile == null) {
+            Toast.makeText(activity, "Failed to save cookie", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Toast.makeText(activity, "Saved cookie: " + savedFile.getName(), Toast.LENGTH_SHORT).show();
+    }
+
+    void showSettingsMenu(View anchor) {
+        PopupMenu menu = new PopupMenu(activity, anchor);
+        int fontMode = host.getSelectedFontMode();
+        menu.getMenu().add(0, MENU_COOKIE_PROFILES, 0, activity.getString(R.string.cookie_profiles));
+        menu.getMenu().add(0, MENU_FONT_MODE_SANS, 1, buildFontMenuTitle(fontMode, FONT_MODE_CHINESE_SANS, "Ruffle 字体: 中文无衬线"));
+        menu.getMenu().add(0, MENU_FONT_MODE_SERIF, 2, buildFontMenuTitle(fontMode, FONT_MODE_CHINESE_SERIF, "Ruffle 字体: 中文衬线"));
+        menu.getMenu().add(0, MENU_FONT_MODE_EMBEDDED, 3, buildFontMenuTitle(fontMode, FONT_MODE_EMBEDDED, "Ruffle 字体: 关闭设备字体"));
+        menu.getMenu().add(0, ORIENTATION_LANDSCAPE, 4, activity.getString(R.string.orientation_landscape));
+        menu.getMenu().add(0, ORIENTATION_PORTRAIT, 5, activity.getString(R.string.orientation_portrait));
+        menu.getMenu().add(0, ORIENTATION_SYSTEM, 6, activity.getString(R.string.orientation_system));
+        menu.getMenu().add(0, MENU_MAPPING_CONFIG, 7, activity.getString(R.string.mapping_config_path));
+        menu.getMenu().add(0, MENU_NAV_PVZ_YOUKIA, 8, "导航到 pvz.youkia.com");
+        menu.setOnMenuItemClickListener(item -> handleSettingsMenuItem(item.getItemId()));
+        menu.show();
+    }
+
+    private boolean handleSettingsMenuItem(int itemId) {
+        if (itemId == MENU_COOKIE_PROFILES) {
+            showCookieProfilesDialog();
+            return true;
+        }
+        if (itemId == MENU_FONT_MODE_SANS) {
+            host.onFontModeSelected(FONT_MODE_CHINESE_SANS);
+            return true;
+        }
+        if (itemId == MENU_FONT_MODE_SERIF) {
+            host.onFontModeSelected(FONT_MODE_CHINESE_SERIF);
+            return true;
+        }
+        if (itemId == MENU_FONT_MODE_EMBEDDED) {
+            host.onFontModeSelected(FONT_MODE_EMBEDDED);
+            return true;
+        }
+        if (itemId == MENU_MAPPING_CONFIG) {
+            Toast.makeText(activity, localMappingManager.getConfigFile().getAbsolutePath(), Toast.LENGTH_LONG).show();
+            return true;
+        }
+        if (itemId == MENU_NAV_PVZ_YOUKIA) {
+            host.loadUrl(PVZ_YOUKIA_ENTRY_URL);
+            return true;
+        }
+        host.onOrientationSelected(itemId);
+        return true;
+    }
+
+    private void showCookieProfilesDialog() {
+        if (!cookieProfileManager.canAccessRootDirectory()) {
+            Toast.makeText(activity, R.string.cookie_storage_permission_needed, Toast.LENGTH_LONG).show();
+            host.requestAllFilesAccessPermission();
+            return;
+        }
+
+        if (!cookieProfileManager.ensureInitialized()) {
+            Toast.makeText(activity, R.string.cookie_copy_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        List<CookieProfileManager.CookieProfile> profiles = cookieProfileManager.loadProfiles();
+        if (profiles.isEmpty()) {
+            Toast.makeText(activity, R.string.cookie_no_profiles, Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        View dialogView = LayoutInflater.from(activity).inflate(R.layout.dialog_cookie_profiles, null);
+        LinearLayout container = dialogView.findViewById(R.id.cookie_profile_container);
+        AlertDialog dialog = new AlertDialog.Builder(activity)
+                .setTitle(R.string.cookie_profile_title)
+                .setView(dialogView)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+
+        renderCookieProfiles(container, profiles, dialog);
+
+        File cookieDir = cookieProfileManager.getRootDirectory();
+        FileObserver observer = new FileObserver(cookieDir.getAbsolutePath(),
+                FileObserver.CREATE
+                        | FileObserver.CLOSE_WRITE
+                        | FileObserver.MOVED_TO
+                        | FileObserver.DELETE
+                        | FileObserver.MOVED_FROM) {
+            @Override
+            public void onEvent(int event, String path) {
+                activity.runOnUiThread(() -> {
+                    if (!dialog.isShowing()) {
+                        return;
+                    }
+                    renderCookieProfiles(container, cookieProfileManager.loadProfiles(), dialog);
+                });
+            }
+        };
+        dialog.setOnShowListener(dialogInterface -> observer.startWatching());
+        dialog.setOnDismissListener(dialogInterface -> observer.stopWatching());
+        dialog.show();
+    }
+
+    private void renderCookieProfiles(
+            LinearLayout container,
+            List<CookieProfileManager.CookieProfile> profiles,
+            AlertDialog dialog
+    ) {
+        container.removeAllViews();
+        if (profiles.isEmpty()) {
+            TextView emptyView = new TextView(activity);
+            emptyView.setText(R.string.cookie_no_profiles);
+            emptyView.setTextColor(0xFF374151);
+            emptyView.setPadding(8, 8, 8, 8);
+            container.addView(emptyView);
+            return;
+        }
+
+        for (CookieProfileManager.CookieProfile profile : profiles) {
+            View itemView = LayoutInflater.from(activity).inflate(R.layout.item_cookie_profile, container, false);
+            TextView fileName = itemView.findViewById(R.id.text_file_name);
+            TextView userName = itemView.findViewById(R.id.text_user_name);
+            fileName.setText(activity.getString(R.string.cookie_file_name, profile.file.getName()));
+            userName.setText(activity.getString(R.string.cookie_user_name, profile.userName));
+            itemView.findViewById(R.id.btn_apply_cookie).setOnClickListener(v -> {
+                dialog.dismiss();
+                applyCookieProfile(profile);
+            });
+            container.addView(itemView);
+        }
+    }
+
+    private void applyCookieProfile(CookieProfileManager.CookieProfile profile) {
+        String targetUrl = CookieProfileManager.buildTargetUrl(profile);
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(true);
+        cookieManager.setCookie(profile.userDomain, profile.userCookies);
+        cookieManager.setCookie(targetUrl, profile.userCookies);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            cookieManager.flush();
+        }
+        host.updateUrlInput(targetUrl);
+        host.loadUrl(targetUrl);
+        Toast.makeText(activity, R.string.cookie_applied, Toast.LENGTH_SHORT).show();
+    }
+
+    private String buildFontMenuTitle(int currentMode, int itemMode, String label) {
+        return (currentMode == itemMode ? "✓ " : "") + label;
     }
 }
