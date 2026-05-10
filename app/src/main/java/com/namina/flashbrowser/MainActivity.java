@@ -93,10 +93,6 @@ public class MainActivity extends AppCompatActivity {
     private static final int ORIENTATION_LANDSCAPE = 0;
     private static final int ORIENTATION_PORTRAIT = 1;
     private static final int ORIENTATION_SYSTEM = 2;
-    private static final int FEATURE_PANEL_TAB_COOKIE = 0;
-    private static final int FEATURE_PANEL_TAB_BASIC = 1;
-    private static final int FEATURE_PANEL_TAB_REPOSITORY = 2;
-    private static final int FEATURE_PANEL_TAB_LOG = 3;
     private static final int FONT_MODE_CHINESE_SANS = 0;
     private static final int FONT_MODE_CHINESE_SERIF = 1;
     private static final int FONT_MODE_EMBEDDED = 2;
@@ -125,51 +121,10 @@ public class MainActivity extends AppCompatActivity {
     private BrowserRequestController browserRequestController;
     private BrowserFullscreenController browserFullscreenController;
     private BrowserTouchController browserTouchController;
+    private FeaturePanelDialogController featurePanelDialogController;
     private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
-    private final FeaturePanelUiController featurePanelUiController = new FeaturePanelUiController();
-    private FeaturePanelCookieController featurePanelCookieController;
-    private FeaturePanelTaskController featurePanelTaskController;
-    private FeaturePanelRepositoryController featurePanelRepositoryController;
     private String pendingLegacyYoukiaSourceUrl;
     private String pendingLegacyYoukiaTargetUrl;
-    private AlertDialog featurePanelDialog;
-    private Button featurePanelTabCookieButton;
-    private Button featurePanelTabBasicButton;
-    private Button featurePanelTabRepositoryButton;
-    private Button featurePanelTabLogButton;
-    private View featurePanelCookiePage;
-    private View featurePanelBasicPage;
-    private View featurePanelRepositoryPage;
-    private View featurePanelLogPage;
-    private LinearLayout featurePanelCookieContainer;
-    private TextView featurePanelCookieHintText;
-    private Button featurePanelSelectAllCookiesButton;
-    private EditText featurePanelConcurrencyInput;
-    private EditText featurePanelRequestIntervalInput;
-    private EditText featurePanelFrequentRetryIntervalInput;
-    private Button featurePanelPauseResumeButton;
-    private Button featurePanelCancelButton;
-    private CheckBox featurePanelDailyDutyCheckBox;
-    private Button featurePanelDailyDutyRunButton;
-    private Button featurePanelStartSelectedButton;
-    private Button featurePanelStorageAccessButton;
-    private TextView featurePanelRepositoryHintText;
-    private TextView featurePanelRepositorySelectedTargetsText;
-    private Button featurePanelRepositoryPickTargetsButton;
-    private TextView featurePanelRepositoryViewCookieText;
-    private Button featurePanelRepositoryPickViewCookieButton;
-    private Button featurePanelRepositoryRefreshButton;
-    private Button featurePanelRepositoryRecordButton;
-    private Button featurePanelRepositoryCompareButton;
-    private Button featurePanelRepositoryIgnoreSelectedButton;
-    private Button featurePanelRepositoryRemoveIgnoredButton;
-    private LinearLayout featurePanelRepositoryCurrentContainer;
-    private LinearLayout featurePanelRepositoryDeltaContainer;
-    private LinearLayout featurePanelRepositoryIgnoredContainer;
-    private TextView featurePanelQueueStatusText;
-    private TextView featurePanelQueueLogText;
-    private final ArrayList<FeatureCookieChoice> featureCookieChoices = new ArrayList<>();
-    private WarehouseRecordManager warehouseRecordManager;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
@@ -241,16 +196,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
         );
-        featurePanelCookieController = new FeaturePanelCookieController(this, preferenceStore, cookieProfileManager);
-        featurePanelTaskController = new FeaturePanelTaskController(preferenceStore);
-        warehouseRecordManager = new WarehouseRecordManager(this);
-        featurePanelRepositoryController = new FeaturePanelRepositoryController(
-                this,
-                preferenceStore,
-                warehouseRecordManager
-        );
         cookieProfileManager.ensureInitialized();
-        dutyRequestQueue.setListener(snapshot -> runOnUiThread(() -> renderFeaturePanelQueueState(snapshot)));
 
         wrapper = findViewById(R.id.web_view);
         urlInput = findViewById(R.id.input_url);
@@ -276,6 +222,16 @@ public class MainActivity extends AppCompatActivity {
         );
         browserFullscreenController.initializeWindowInsets();
         browserTouchController = new BrowserTouchController(this, wrapper);
+        featurePanelDialogController = new FeaturePanelDialogController(
+                this,
+                wrapper,
+                preferenceStore,
+                cookieProfileManager,
+                new WarehouseRecordManager(this),
+                dutyRequestQueue,
+                this::requestAllFilesAccessPermission
+        );
+        dutyRequestQueue.setListener(snapshot -> runOnUiThread(() -> featurePanelDialogController.renderQueueState(snapshot)));
 
         findViewById(R.id.btn_back).setOnClickListener(v -> {
             if (wrapper.canGoBack()) {
@@ -290,10 +246,10 @@ public class MainActivity extends AppCompatActivity {
         });
 
         findViewById(R.id.btn_refresh).setOnClickListener(v -> wrapper.reload());
-        findViewById(R.id.btn_go).setOnClickListener(v -> showFeaturePanelDialog());
+        findViewById(R.id.btn_go).setOnClickListener(v -> featurePanelDialogController.show());
         findViewById(R.id.btn_fullscreen).setOnClickListener(v -> browserFullscreenController.toggleRuffleFullscreenCompat());
         findViewById(R.id.btn_save_cookie).setOnClickListener(v -> browserSettingsController.saveCurrentCookieProfile());
-        fullscreenFeaturePanelButton.setOnClickListener(v -> toggleFeaturePanelDialog());
+        fullscreenFeaturePanelButton.setOnClickListener(v -> featurePanelDialogController.toggle());
         legacyYoukiaRedirectButton.setOnClickListener(v -> performPendingLegacyYoukiaRedirect());
         fullscreenRotateButton.setOnClickListener(v -> browserFullscreenController.rotateFullscreenOrientation());
         fullscreenExitButton.setOnClickListener(v -> browserFullscreenController.handleExitButtonClick());
@@ -324,11 +280,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (featurePanelDialog != null && featurePanelDialog.isShowing()) {
-            refreshFeaturePanelCookieChoices();
-            featurePanelRepositoryController.render(featureCookieChoices);
-            renderFeaturePanelQueueState(dutyRequestQueue.snapshot());
-        }
+        featurePanelDialogController.onResume();
     }
 
     private void setupWebView() {
@@ -946,369 +898,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void showFeaturePanelDialog() {
-        if (featurePanelDialog != null && featurePanelDialog.isShowing()) {
-            return;
-        }
-        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_feature_panel, null);
-        featurePanelTabCookieButton = dialogView.findViewById(R.id.btn_panel_tab_cookie);
-        featurePanelTabBasicButton = dialogView.findViewById(R.id.btn_panel_tab_basic);
-        featurePanelTabRepositoryButton = dialogView.findViewById(R.id.btn_panel_tab_repository);
-        featurePanelTabLogButton = dialogView.findViewById(R.id.btn_panel_tab_log);
-        featurePanelCookiePage = dialogView.findViewById(R.id.panel_page_cookie);
-        featurePanelBasicPage = dialogView.findViewById(R.id.panel_page_basic);
-        featurePanelRepositoryPage = dialogView.findViewById(R.id.panel_page_repository);
-        featurePanelLogPage = dialogView.findViewById(R.id.panel_page_log);
-        featurePanelCookieContainer = dialogView.findViewById(R.id.panel_cookie_container);
-        featurePanelCookieHintText = dialogView.findViewById(R.id.text_cookie_selection_hint);
-        featurePanelSelectAllCookiesButton = dialogView.findViewById(R.id.btn_panel_select_all_cookies);
-        featurePanelConcurrencyInput = dialogView.findViewById(R.id.input_panel_concurrency);
-        featurePanelRequestIntervalInput = dialogView.findViewById(R.id.input_panel_request_interval);
-        featurePanelFrequentRetryIntervalInput = dialogView.findViewById(R.id.input_panel_frequent_retry_interval);
-        featurePanelPauseResumeButton = dialogView.findViewById(R.id.btn_panel_pause_resume);
-        featurePanelCancelButton = dialogView.findViewById(R.id.btn_panel_cancel);
-        featurePanelDailyDutyCheckBox = dialogView.findViewById(R.id.check_panel_daily_duty);
-        featurePanelDailyDutyRunButton = dialogView.findViewById(R.id.btn_panel_daily_duty_run);
-        featurePanelStartSelectedButton = dialogView.findViewById(R.id.btn_panel_start_selected);
-        featurePanelStorageAccessButton = dialogView.findViewById(R.id.btn_panel_request_storage_access);
-        featurePanelRepositoryHintText = dialogView.findViewById(R.id.text_panel_repository_hint);
-        featurePanelRepositorySelectedTargetsText = dialogView.findViewById(R.id.text_panel_repository_selected_targets);
-        featurePanelRepositoryPickTargetsButton = dialogView.findViewById(R.id.btn_panel_repository_pick_targets);
-        featurePanelRepositoryViewCookieText = dialogView.findViewById(R.id.text_panel_repository_view_cookie);
-        featurePanelRepositoryPickViewCookieButton = dialogView.findViewById(R.id.btn_panel_repository_pick_view_cookie);
-        featurePanelRepositoryRefreshButton = dialogView.findViewById(R.id.btn_panel_repository_refresh);
-        featurePanelRepositoryRecordButton = dialogView.findViewById(R.id.btn_panel_repository_record);
-        featurePanelRepositoryCompareButton = dialogView.findViewById(R.id.btn_panel_repository_compare);
-        featurePanelRepositoryIgnoreSelectedButton = dialogView.findViewById(R.id.btn_panel_repository_ignore_selected);
-        featurePanelRepositoryRemoveIgnoredButton = dialogView.findViewById(R.id.btn_panel_repository_remove_ignored);
-        featurePanelRepositoryCurrentContainer = dialogView.findViewById(R.id.panel_repository_current_container);
-        featurePanelRepositoryDeltaContainer = dialogView.findViewById(R.id.panel_repository_delta_container);
-        featurePanelRepositoryIgnoredContainer = dialogView.findViewById(R.id.panel_repository_ignored_container);
-        featurePanelQueueStatusText = dialogView.findViewById(R.id.text_panel_queue_status);
-        featurePanelQueueLogText = dialogView.findViewById(R.id.text_panel_queue_log);
-        featurePanelUiController.bind(
-                featurePanelTabCookieButton,
-                featurePanelTabBasicButton,
-                featurePanelTabRepositoryButton,
-                featurePanelTabLogButton,
-                featurePanelCookiePage,
-                featurePanelBasicPage,
-                featurePanelRepositoryPage,
-                featurePanelLogPage,
-                featurePanelQueueStatusText,
-                featurePanelQueueLogText,
-                featurePanelPauseResumeButton,
-                featurePanelCancelButton,
-                featurePanelDailyDutyRunButton,
-                featurePanelStartSelectedButton
-        );
-        featurePanelRepositoryController.bind(
-                featurePanelRepositoryHintText,
-                featurePanelRepositorySelectedTargetsText,
-                featurePanelRepositoryPickTargetsButton,
-                featurePanelRepositoryViewCookieText,
-                featurePanelRepositoryPickViewCookieButton,
-                featurePanelRepositoryRefreshButton,
-                featurePanelRepositoryRecordButton,
-                featurePanelRepositoryCompareButton,
-                featurePanelRepositoryIgnoreSelectedButton,
-                featurePanelRepositoryRemoveIgnoredButton,
-                featurePanelRepositoryCurrentContainer,
-                featurePanelRepositoryDeltaContainer,
-                featurePanelRepositoryIgnoredContainer
-        );
-
-        featurePanelConcurrencyInput.setText(String.valueOf(getSavedPanelConcurrency()));
-        featurePanelRequestIntervalInput.setText(String.valueOf(getSavedPanelRequestInterval()));
-        featurePanelFrequentRetryIntervalInput.setText(String.valueOf(getSavedPanelFrequentRetryInterval()));
-        featurePanelDailyDutyCheckBox.setChecked(preferenceStore.isPanelDailyDutyEnabled());
-        featurePanelDailyDutyCheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
-                preferenceStore.setPanelDailyDutyEnabled(isChecked));
-        featurePanelTabCookieButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_COOKIE));
-        featurePanelTabBasicButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_BASIC));
-        featurePanelTabRepositoryButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_REPOSITORY));
-        featurePanelTabLogButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_LOG));
-        featurePanelSelectAllCookiesButton.setOnClickListener(v -> selectAllFeaturePanelCookies());
-        featurePanelRepositoryPickTargetsButton.setOnClickListener(
-                v -> featurePanelRepositoryController.showTargetPickerDialog(featureCookieChoices)
-        );
-        featurePanelRepositoryPickViewCookieButton.setOnClickListener(
-                v -> featurePanelRepositoryController.showViewPickerDialog(featureCookieChoices)
-        );
-        featurePanelRepositoryRefreshButton.setOnClickListener(
-                v -> featurePanelRepositoryController.refreshSelectedTargets(featureCookieChoices)
-        );
-        featurePanelRepositoryRecordButton.setOnClickListener(
-                v -> featurePanelRepositoryController.recordSelectedTargets(featureCookieChoices)
-        );
-        featurePanelRepositoryCompareButton.setOnClickListener(
-                v -> featurePanelRepositoryController.compareSelectedTargets(featureCookieChoices)
-        );
-        featurePanelRepositoryIgnoreSelectedButton.setOnClickListener(
-                v -> featurePanelRepositoryController.addSelectedDeltasToIgnored(featureCookieChoices)
-        );
-        featurePanelRepositoryRemoveIgnoredButton.setOnClickListener(
-                v -> featurePanelRepositoryController.removeSelectedIgnoredItems(featureCookieChoices)
-        );
-        featurePanelPauseResumeButton.setOnClickListener(v -> {
-            DutyRequestQueue.StateSnapshot snapshot = dutyRequestQueue.snapshot();
-            if (snapshot.running && !snapshot.paused) {
-                dutyRequestQueue.pause();
-            } else if (snapshot.running) {
-                dutyRequestQueue.resume();
-            }
-        });
-        featurePanelCancelButton.setOnClickListener(v -> dutyRequestQueue.cancel());
-        featurePanelDailyDutyRunButton.setOnClickListener(v -> startDailyDutyRequestsFromPanel(false));
-        featurePanelStartSelectedButton.setOnClickListener(v -> startDailyDutyRequestsFromPanel(true));
-        featurePanelStorageAccessButton.setOnClickListener(v -> requestAllFilesAccessPermission());
-
-        featurePanelDialog = new AlertDialog.Builder(this)
-                .setTitle("功能面板")
-                .setView(dialogView)
-                .setNegativeButton(android.R.string.cancel, null)
-                .create();
-        featurePanelDialog.setOnDismissListener(dialog -> clearFeaturePanelReferences());
-        featurePanelDialog.show();
-        if (featurePanelDialog.getWindow() != null) {
-            int width = Math.min((int) (getResources().getDisplayMetrics().widthPixels * 0.94f), dpToPx(920));
-            int height = (int) (getResources().getDisplayMetrics().heightPixels * 0.88f);
-            featurePanelDialog.getWindow().setLayout(width, height);
-        }
-
-        refreshFeaturePanelCookieChoices();
-        featurePanelRepositoryController.render(featureCookieChoices);
-        switchFeaturePanelTab(FEATURE_PANEL_TAB_COOKIE);
-        renderFeaturePanelQueueState(dutyRequestQueue.snapshot());
-    }
-
-    private void toggleFeaturePanelDialog() {
-        if (featurePanelDialog != null && featurePanelDialog.isShowing()) {
-            featurePanelDialog.dismiss();
-            return;
-        }
-        showFeaturePanelDialog();
-    }
-
-    private void clearFeaturePanelReferences() {
-        featurePanelDialog = null;
-        featurePanelTabCookieButton = null;
-        featurePanelTabBasicButton = null;
-        featurePanelTabRepositoryButton = null;
-        featurePanelTabLogButton = null;
-        featurePanelCookiePage = null;
-        featurePanelBasicPage = null;
-        featurePanelRepositoryPage = null;
-        featurePanelLogPage = null;
-        featurePanelCookieContainer = null;
-        featurePanelCookieHintText = null;
-        featurePanelSelectAllCookiesButton = null;
-        featurePanelConcurrencyInput = null;
-        featurePanelRequestIntervalInput = null;
-        featurePanelFrequentRetryIntervalInput = null;
-        featurePanelPauseResumeButton = null;
-        featurePanelCancelButton = null;
-        featurePanelDailyDutyCheckBox = null;
-        featurePanelDailyDutyRunButton = null;
-        featurePanelStartSelectedButton = null;
-        featurePanelStorageAccessButton = null;
-        featurePanelRepositoryHintText = null;
-        featurePanelRepositorySelectedTargetsText = null;
-        featurePanelRepositoryPickTargetsButton = null;
-        featurePanelRepositoryViewCookieText = null;
-        featurePanelRepositoryPickViewCookieButton = null;
-        featurePanelRepositoryRefreshButton = null;
-        featurePanelRepositoryRecordButton = null;
-        featurePanelRepositoryCompareButton = null;
-        featurePanelRepositoryIgnoreSelectedButton = null;
-        featurePanelRepositoryRemoveIgnoredButton = null;
-        featurePanelRepositoryCurrentContainer = null;
-        featurePanelRepositoryDeltaContainer = null;
-        featurePanelRepositoryIgnoredContainer = null;
-        featurePanelQueueStatusText = null;
-        featurePanelQueueLogText = null;
-        featurePanelUiController.clear();
-        featurePanelRepositoryController.clear();
-        featureCookieChoices.clear();
-    }
-
-    private void refreshFeaturePanelCookieChoices() {
-        featurePanelCookieController.renderChoices(
-                featurePanelCookieContainer,
-                featurePanelCookieHintText,
-                featurePanelStorageAccessButton,
-                featureCookieChoices,
-                buildCurrentPageFeatureCookieChoice(),
-                this::onFeaturePanelCookieChoicesChanged
-        );
-    }
-
-    private void onFeaturePanelCookieChoicesChanged() {
-        featurePanelRepositoryController.render(featureCookieChoices);
-    }
-
-    private void selectAllFeaturePanelCookies() {
-        featurePanelCookieController.selectAll(featureCookieChoices);
-        refreshFeaturePanelCookieChoices();
-        featurePanelRepositoryController.render(featureCookieChoices);
-    }
-
-    private FeatureCookieChoice buildCurrentPageFeatureCookieChoice() {
-        String currentUrl = wrapper == null ? null : wrapper.getUrl();
-        if (TextUtils.isEmpty(currentUrl)) {
-            return null;
-        }
-        Uri currentUri = Uri.parse(currentUrl);
-        if (!CookieProfileManager.isSupportedSavePage(currentUri)) {
-            return null;
-        }
-        String cookies = CookieManager.getInstance().getCookie(currentUrl);
-        String baseUrl = CookieProfileManager.buildRootUrl(currentUri);
-        if (TextUtils.isEmpty(cookies) || TextUtils.isEmpty(baseUrl)) {
-            return null;
-        }
-
-        FeatureCookieChoice choice = new FeatureCookieChoice();
-        choice.label = TextUtils.isEmpty(wrapper.getTitle()) ? currentUri.getHost() : wrapper.getTitle();
-        choice.pageUrl = currentUrl;
-        choice.subtitle = currentUrl;
-        choice.baseUrl = baseUrl;
-        choice.cookies = cookies;
-        choice.currentPage = true;
-        choice.selected = preferenceStore.isCurrentPageCookieSelectedByDefault();
-        return choice;
-    }
-
-    private int getSavedPanelConcurrency() {
-        return featurePanelTaskController == null ? preferenceStore.getPanelConcurrency(1)
-                : featurePanelTaskController.getSavedConcurrency();
-    }
-
-    private int getSavedPanelRequestInterval() {
-        return featurePanelTaskController == null ? preferenceStore.getPanelRequestInterval(700)
-                : featurePanelTaskController.getSavedRequestInterval();
-    }
-
-    private int getSavedPanelFrequentRetryInterval() {
-        return featurePanelTaskController == null ? preferenceStore.getPanelFrequentRetryInterval(14000)
-                : featurePanelTaskController.getSavedFrequentRetryInterval();
-    }
-
-    private void switchFeaturePanelTab(int tab) {
-        featurePanelUiController.switchTab(
-                tab,
-                FEATURE_PANEL_TAB_COOKIE,
-                FEATURE_PANEL_TAB_BASIC,
-                FEATURE_PANEL_TAB_REPOSITORY,
-                FEATURE_PANEL_TAB_LOG
-        );
-    }
-
-    private void startDailyDutyRequestsFromPanel(boolean startCheckedItemsOnly) {
-        if (featurePanelConcurrencyInput == null
-                || featurePanelRequestIntervalInput == null
-                || featurePanelFrequentRetryIntervalInput == null) {
-            return;
-        }
-        if (dutyRequestQueue.isBusy()) {
-            Toast.makeText(this, "请求队列正在运行，请先暂停或终止。", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        boolean dailyDutyChecked = featurePanelDailyDutyCheckBox != null && featurePanelDailyDutyCheckBox.isChecked();
-        FeaturePanelTaskController.BuildResult buildResult = featurePanelTaskController.buildStartRequest(
-                featureCookieChoices,
-                featurePanelConcurrencyInput.getText().toString(),
-                featurePanelRequestIntervalInput.getText().toString(),
-                featurePanelFrequentRetryIntervalInput.getText().toString(),
-                dailyDutyChecked,
-                startCheckedItemsOnly
-        );
-        featurePanelConcurrencyInput.setText(String.valueOf(getSavedPanelConcurrency()));
-        featurePanelRequestIntervalInput.setText(String.valueOf(getSavedPanelRequestInterval()));
-        featurePanelFrequentRetryIntervalInput.setText(String.valueOf(getSavedPanelFrequentRetryInterval()));
-        if (buildResult.errorMessage != null) {
-            Toast.makeText(this, buildResult.errorMessage, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        FeaturePanelTaskController.StartRequest request = buildResult.request;
-        dutyRequestQueue.startDailyDutyRewards(
-                request.targets,
-                request.concurrency,
-                request.requestIntervalMs,
-                request.frequentRetryIntervalMs
-        );
-    }
-
-    private void renderFeaturePanelQueueState(DutyRequestQueue.StateSnapshot snapshot) {
-        if (featurePanelUiController != null) {
-            featurePanelUiController.renderQueueState(snapshot);
-            return;
-        }
-        if (snapshot == null) {
-            return;
-        }
-
-        if (featurePanelQueueStatusText != null) {
-            String state;
-            if (snapshot.cancelling) {
-                state = "正在终止";
-            } else if (snapshot.running && snapshot.paused) {
-                state = "已暂停";
-            } else if (snapshot.running) {
-                state = "运行中";
-            } else {
-                state = "空闲";
-            }
-            featurePanelQueueStatusText.setText(
-                    "状态：" + state
-                            + "\n总数：" + snapshot.total
-                            + "  排队：" + snapshot.queued
-                            + "  进行中：" + snapshot.active
-                            + "\n完成：" + snapshot.completed
-                            + "  失败：" + snapshot.failed
-                            + "  跳过：" + snapshot.skipped
-            );
-        }
-
-        if (featurePanelQueueLogText != null) {
-            if (snapshot.logs.isEmpty()) {
-                featurePanelQueueLogText.setText("暂无日志");
-            } else {
-                StringBuilder builder = new StringBuilder();
-                for (String line : snapshot.logs) {
-                    if (builder.length() > 0) {
-                        builder.append('\n');
-                    }
-                    builder.append(line);
-                }
-                featurePanelQueueLogText.setText(builder.toString());
-            }
-        }
-
-        if (featurePanelPauseResumeButton != null) {
-            if (snapshot.running && snapshot.paused) {
-                featurePanelPauseResumeButton.setText("继续");
-            } else {
-                featurePanelPauseResumeButton.setText("暂停");
-            }
-            featurePanelPauseResumeButton.setEnabled(snapshot.running && !snapshot.cancelling);
-        }
-        if (featurePanelCancelButton != null) {
-            featurePanelCancelButton.setEnabled(snapshot.running || snapshot.paused || snapshot.cancelling);
-        }
-        boolean idle = !snapshot.running && !snapshot.paused && !snapshot.cancelling;
-        if (featurePanelDailyDutyRunButton != null) {
-            featurePanelDailyDutyRunButton.setEnabled(idle);
-        }
-        if (featurePanelStartSelectedButton != null) {
-            featurePanelStartSelectedButton.setEnabled(idle);
-        }
-    }
-
-    private int dpToPx(int dp) {
-        return Math.round(dp * getResources().getDisplayMetrics().density);
-    }
-
     private void requestAllFilesAccessPermission() {
         try {
             Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
@@ -1380,6 +969,394 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+}
+
+final class FeaturePanelDialogController {
+    private static final int TAB_COOKIE = 0;
+    private static final int TAB_BASIC = 1;
+    private static final int TAB_REPOSITORY = 2;
+    private static final int TAB_LOG = 3;
+
+    private final AppCompatActivity activity;
+    private final WebView webView;
+    private final BrowserPreferenceStore preferenceStore;
+    private final DutyRequestQueue dutyRequestQueue;
+    private final FeaturePanelUiController uiController;
+    private final FeaturePanelCookieController cookieController;
+    private final FeaturePanelTaskController taskController;
+    private final FeaturePanelRepositoryController repositoryController;
+    private final Runnable requestAllFilesAccessAction;
+    private final ArrayList<FeatureCookieChoice> featureCookieChoices = new ArrayList<>();
+
+    private AlertDialog dialog;
+    private Button tabCookieButton;
+    private Button tabBasicButton;
+    private Button tabRepositoryButton;
+    private Button tabLogButton;
+    private View cookiePage;
+    private View basicPage;
+    private View repositoryPage;
+    private View logPage;
+    private LinearLayout cookieContainer;
+    private TextView cookieHintText;
+    private Button selectAllCookiesButton;
+    private EditText concurrencyInput;
+    private EditText requestIntervalInput;
+    private EditText frequentRetryIntervalInput;
+    private Button pauseResumeButton;
+    private Button cancelButton;
+    private CheckBox dailyDutyCheckBox;
+    private Button dailyDutyRunButton;
+    private Button startSelectedButton;
+    private Button storageAccessButton;
+    private TextView repositoryHintText;
+    private TextView repositorySelectedTargetsText;
+    private Button repositoryPickTargetsButton;
+    private TextView repositoryViewCookieText;
+    private Button repositoryPickViewCookieButton;
+    private Button repositoryRefreshButton;
+    private Button repositoryRecordButton;
+    private Button repositoryCompareButton;
+    private Button repositoryIgnoreSelectedButton;
+    private Button repositoryRemoveIgnoredButton;
+    private LinearLayout repositoryCurrentContainer;
+    private LinearLayout repositoryDeltaContainer;
+    private LinearLayout repositoryIgnoredContainer;
+    private TextView queueStatusText;
+    private TextView queueLogText;
+
+    FeaturePanelDialogController(
+            AppCompatActivity activity,
+            WebView webView,
+            BrowserPreferenceStore preferenceStore,
+            CookieProfileManager cookieProfileManager,
+            WarehouseRecordManager warehouseRecordManager,
+            DutyRequestQueue dutyRequestQueue,
+            Runnable requestAllFilesAccessAction
+    ) {
+        this.activity = activity;
+        this.webView = webView;
+        this.preferenceStore = preferenceStore;
+        this.dutyRequestQueue = dutyRequestQueue;
+        this.requestAllFilesAccessAction = requestAllFilesAccessAction;
+        this.uiController = new FeaturePanelUiController();
+        this.cookieController = new FeaturePanelCookieController(activity, preferenceStore, cookieProfileManager);
+        this.taskController = new FeaturePanelTaskController(preferenceStore);
+        this.repositoryController = new FeaturePanelRepositoryController(
+                activity,
+                preferenceStore,
+                warehouseRecordManager
+        );
+    }
+
+    void onResume() {
+        if (dialog != null && dialog.isShowing()) {
+            refreshCookieChoices();
+            repositoryController.render(featureCookieChoices);
+            renderQueueState(dutyRequestQueue.snapshot());
+        }
+    }
+
+    void show() {
+        if (dialog != null && dialog.isShowing()) {
+            return;
+        }
+
+        View dialogView = LayoutInflater.from(activity).inflate(R.layout.dialog_feature_panel, null);
+        bindViews(dialogView);
+        bindControllers();
+        bindActions();
+
+        dialog = new AlertDialog.Builder(activity)
+                .setTitle("Feature Panel")
+                .setView(dialogView)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnDismissListener(ignored -> clearReferences());
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            int width = Math.min(
+                    (int) (activity.getResources().getDisplayMetrics().widthPixels * 0.94f),
+                    dpToPx(920)
+            );
+            int height = (int) (activity.getResources().getDisplayMetrics().heightPixels * 0.88f);
+            dialog.getWindow().setLayout(width, height);
+        }
+
+        refreshCookieChoices();
+        repositoryController.render(featureCookieChoices);
+        switchTab(TAB_COOKIE);
+        renderQueueState(dutyRequestQueue.snapshot());
+    }
+
+    void toggle() {
+        if (dialog != null && dialog.isShowing()) {
+            dialog.dismiss();
+            return;
+        }
+        show();
+    }
+
+    void renderQueueState(DutyRequestQueue.StateSnapshot snapshot) {
+        uiController.renderQueueState(snapshot);
+    }
+
+    private void bindViews(View dialogView) {
+        tabCookieButton = dialogView.findViewById(R.id.btn_panel_tab_cookie);
+        tabBasicButton = dialogView.findViewById(R.id.btn_panel_tab_basic);
+        tabRepositoryButton = dialogView.findViewById(R.id.btn_panel_tab_repository);
+        tabLogButton = dialogView.findViewById(R.id.btn_panel_tab_log);
+        cookiePage = dialogView.findViewById(R.id.panel_page_cookie);
+        basicPage = dialogView.findViewById(R.id.panel_page_basic);
+        repositoryPage = dialogView.findViewById(R.id.panel_page_repository);
+        logPage = dialogView.findViewById(R.id.panel_page_log);
+        cookieContainer = dialogView.findViewById(R.id.panel_cookie_container);
+        cookieHintText = dialogView.findViewById(R.id.text_cookie_selection_hint);
+        selectAllCookiesButton = dialogView.findViewById(R.id.btn_panel_select_all_cookies);
+        concurrencyInput = dialogView.findViewById(R.id.input_panel_concurrency);
+        requestIntervalInput = dialogView.findViewById(R.id.input_panel_request_interval);
+        frequentRetryIntervalInput = dialogView.findViewById(R.id.input_panel_frequent_retry_interval);
+        pauseResumeButton = dialogView.findViewById(R.id.btn_panel_pause_resume);
+        cancelButton = dialogView.findViewById(R.id.btn_panel_cancel);
+        dailyDutyCheckBox = dialogView.findViewById(R.id.check_panel_daily_duty);
+        dailyDutyRunButton = dialogView.findViewById(R.id.btn_panel_daily_duty_run);
+        startSelectedButton = dialogView.findViewById(R.id.btn_panel_start_selected);
+        storageAccessButton = dialogView.findViewById(R.id.btn_panel_request_storage_access);
+        repositoryHintText = dialogView.findViewById(R.id.text_panel_repository_hint);
+        repositorySelectedTargetsText = dialogView.findViewById(R.id.text_panel_repository_selected_targets);
+        repositoryPickTargetsButton = dialogView.findViewById(R.id.btn_panel_repository_pick_targets);
+        repositoryViewCookieText = dialogView.findViewById(R.id.text_panel_repository_view_cookie);
+        repositoryPickViewCookieButton = dialogView.findViewById(R.id.btn_panel_repository_pick_view_cookie);
+        repositoryRefreshButton = dialogView.findViewById(R.id.btn_panel_repository_refresh);
+        repositoryRecordButton = dialogView.findViewById(R.id.btn_panel_repository_record);
+        repositoryCompareButton = dialogView.findViewById(R.id.btn_panel_repository_compare);
+        repositoryIgnoreSelectedButton = dialogView.findViewById(R.id.btn_panel_repository_ignore_selected);
+        repositoryRemoveIgnoredButton = dialogView.findViewById(R.id.btn_panel_repository_remove_ignored);
+        repositoryCurrentContainer = dialogView.findViewById(R.id.panel_repository_current_container);
+        repositoryDeltaContainer = dialogView.findViewById(R.id.panel_repository_delta_container);
+        repositoryIgnoredContainer = dialogView.findViewById(R.id.panel_repository_ignored_container);
+        queueStatusText = dialogView.findViewById(R.id.text_panel_queue_status);
+        queueLogText = dialogView.findViewById(R.id.text_panel_queue_log);
+    }
+
+    private void bindControllers() {
+        uiController.bind(
+                tabCookieButton,
+                tabBasicButton,
+                tabRepositoryButton,
+                tabLogButton,
+                cookiePage,
+                basicPage,
+                repositoryPage,
+                logPage,
+                queueStatusText,
+                queueLogText,
+                pauseResumeButton,
+                cancelButton,
+                dailyDutyRunButton,
+                startSelectedButton
+        );
+        repositoryController.bind(
+                repositoryHintText,
+                repositorySelectedTargetsText,
+                repositoryPickTargetsButton,
+                repositoryViewCookieText,
+                repositoryPickViewCookieButton,
+                repositoryRefreshButton,
+                repositoryRecordButton,
+                repositoryCompareButton,
+                repositoryIgnoreSelectedButton,
+                repositoryRemoveIgnoredButton,
+                repositoryCurrentContainer,
+                repositoryDeltaContainer,
+                repositoryIgnoredContainer
+        );
+
+        concurrencyInput.setText(String.valueOf(taskController.getSavedConcurrency()));
+        requestIntervalInput.setText(String.valueOf(taskController.getSavedRequestInterval()));
+        frequentRetryIntervalInput.setText(String.valueOf(taskController.getSavedFrequentRetryInterval()));
+        dailyDutyCheckBox.setChecked(preferenceStore.isPanelDailyDutyEnabled());
+    }
+
+    private void bindActions() {
+        dailyDutyCheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setPanelDailyDutyEnabled(isChecked));
+        tabCookieButton.setOnClickListener(v -> switchTab(TAB_COOKIE));
+        tabBasicButton.setOnClickListener(v -> switchTab(TAB_BASIC));
+        tabRepositoryButton.setOnClickListener(v -> switchTab(TAB_REPOSITORY));
+        tabLogButton.setOnClickListener(v -> switchTab(TAB_LOG));
+        selectAllCookiesButton.setOnClickListener(v -> selectAllCookies());
+        repositoryPickTargetsButton.setOnClickListener(
+                v -> repositoryController.showTargetPickerDialog(featureCookieChoices)
+        );
+        repositoryPickViewCookieButton.setOnClickListener(
+                v -> repositoryController.showViewPickerDialog(featureCookieChoices)
+        );
+        repositoryRefreshButton.setOnClickListener(
+                v -> repositoryController.refreshSelectedTargets(featureCookieChoices)
+        );
+        repositoryRecordButton.setOnClickListener(
+                v -> repositoryController.recordSelectedTargets(featureCookieChoices)
+        );
+        repositoryCompareButton.setOnClickListener(
+                v -> repositoryController.compareSelectedTargets(featureCookieChoices)
+        );
+        repositoryIgnoreSelectedButton.setOnClickListener(
+                v -> repositoryController.addSelectedDeltasToIgnored(featureCookieChoices)
+        );
+        repositoryRemoveIgnoredButton.setOnClickListener(
+                v -> repositoryController.removeSelectedIgnoredItems(featureCookieChoices)
+        );
+        pauseResumeButton.setOnClickListener(v -> {
+            DutyRequestQueue.StateSnapshot snapshot = dutyRequestQueue.snapshot();
+            if (snapshot.running && !snapshot.paused) {
+                dutyRequestQueue.pause();
+            } else if (snapshot.running) {
+                dutyRequestQueue.resume();
+            }
+        });
+        cancelButton.setOnClickListener(v -> dutyRequestQueue.cancel());
+        dailyDutyRunButton.setOnClickListener(v -> startDailyDutyRequests(false));
+        startSelectedButton.setOnClickListener(v -> startDailyDutyRequests(true));
+        storageAccessButton.setOnClickListener(v -> requestAllFilesAccessAction.run());
+    }
+
+    private void refreshCookieChoices() {
+        cookieController.renderChoices(
+                cookieContainer,
+                cookieHintText,
+                storageAccessButton,
+                featureCookieChoices,
+                buildCurrentPageChoice(),
+                this::onCookieChoicesChanged
+        );
+    }
+
+    private void onCookieChoicesChanged() {
+        repositoryController.render(featureCookieChoices);
+    }
+
+    private void selectAllCookies() {
+        cookieController.selectAll(featureCookieChoices);
+        refreshCookieChoices();
+        repositoryController.render(featureCookieChoices);
+    }
+
+    private FeatureCookieChoice buildCurrentPageChoice() {
+        String currentUrl = webView == null ? null : webView.getUrl();
+        if (TextUtils.isEmpty(currentUrl)) {
+            return null;
+        }
+        Uri currentUri = Uri.parse(currentUrl);
+        if (!CookieProfileManager.isSupportedSavePage(currentUri)) {
+            return null;
+        }
+
+        String cookies = CookieManager.getInstance().getCookie(currentUrl);
+        String baseUrl = CookieProfileManager.buildRootUrl(currentUri);
+        if (TextUtils.isEmpty(cookies) || TextUtils.isEmpty(baseUrl)) {
+            return null;
+        }
+
+        FeatureCookieChoice choice = new FeatureCookieChoice();
+        String pageTitle = webView == null ? null : webView.getTitle();
+        choice.label = TextUtils.isEmpty(pageTitle) ? currentUri.getHost() : pageTitle;
+        choice.pageUrl = currentUrl;
+        choice.subtitle = currentUrl;
+        choice.baseUrl = baseUrl;
+        choice.cookies = cookies;
+        choice.currentPage = true;
+        choice.selected = preferenceStore.isCurrentPageCookieSelectedByDefault();
+        return choice;
+    }
+
+    private void switchTab(int tab) {
+        uiController.switchTab(tab, TAB_COOKIE, TAB_BASIC, TAB_REPOSITORY, TAB_LOG);
+    }
+
+    private void startDailyDutyRequests(boolean startCheckedItemsOnly) {
+        if (concurrencyInput == null
+                || requestIntervalInput == null
+                || frequentRetryIntervalInput == null) {
+            return;
+        }
+        if (dutyRequestQueue.isBusy()) {
+            Toast.makeText(activity, "Request queue is already running", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        boolean dailyDutyChecked = dailyDutyCheckBox != null && dailyDutyCheckBox.isChecked();
+        FeaturePanelTaskController.BuildResult buildResult = taskController.buildStartRequest(
+                featureCookieChoices,
+                concurrencyInput.getText().toString(),
+                requestIntervalInput.getText().toString(),
+                frequentRetryIntervalInput.getText().toString(),
+                dailyDutyChecked,
+                startCheckedItemsOnly
+        );
+        concurrencyInput.setText(String.valueOf(taskController.getSavedConcurrency()));
+        requestIntervalInput.setText(String.valueOf(taskController.getSavedRequestInterval()));
+        frequentRetryIntervalInput.setText(String.valueOf(taskController.getSavedFrequentRetryInterval()));
+        if (buildResult.errorMessage != null) {
+            Toast.makeText(activity, buildResult.errorMessage, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        FeaturePanelTaskController.StartRequest request = buildResult.request;
+        dutyRequestQueue.startDailyDutyRewards(
+                request.targets,
+                request.concurrency,
+                request.requestIntervalMs,
+                request.frequentRetryIntervalMs
+        );
+    }
+
+    private void clearReferences() {
+        dialog = null;
+        tabCookieButton = null;
+        tabBasicButton = null;
+        tabRepositoryButton = null;
+        tabLogButton = null;
+        cookiePage = null;
+        basicPage = null;
+        repositoryPage = null;
+        logPage = null;
+        cookieContainer = null;
+        cookieHintText = null;
+        selectAllCookiesButton = null;
+        concurrencyInput = null;
+        requestIntervalInput = null;
+        frequentRetryIntervalInput = null;
+        pauseResumeButton = null;
+        cancelButton = null;
+        dailyDutyCheckBox = null;
+        dailyDutyRunButton = null;
+        startSelectedButton = null;
+        storageAccessButton = null;
+        repositoryHintText = null;
+        repositorySelectedTargetsText = null;
+        repositoryPickTargetsButton = null;
+        repositoryViewCookieText = null;
+        repositoryPickViewCookieButton = null;
+        repositoryRefreshButton = null;
+        repositoryRecordButton = null;
+        repositoryCompareButton = null;
+        repositoryIgnoreSelectedButton = null;
+        repositoryRemoveIgnoredButton = null;
+        repositoryCurrentContainer = null;
+        repositoryDeltaContainer = null;
+        repositoryIgnoredContainer = null;
+        queueStatusText = null;
+        queueLogText = null;
+        uiController.clear();
+        repositoryController.clear();
+        featureCookieChoices.clear();
+    }
+
+    private int dpToPx(int dp) {
+        float density = activity.getResources().getDisplayMetrics().density;
+        return Math.round(dp * density);
+    }
 }
 
 final class BrowserFullscreenController {
