@@ -19,7 +19,7 @@
         android:theme="@style/Theme.FlashBrowser"
         android:usesCleartextTraffic="true">
         <activity
-            android:name=".MainActivity"
+            android:name="com.namina.flashbrowser.MainActivity"
             android:enableOnBackInvokedCallback="true"
             android:hardwareAccelerated="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden"
