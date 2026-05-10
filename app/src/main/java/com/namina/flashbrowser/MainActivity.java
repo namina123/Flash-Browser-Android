@@ -133,21 +133,12 @@ public class MainActivity extends AppCompatActivity {
     private int fullscreenRotateBaseRightMargin;
     private int fullscreenExitBaseTopMargin;
     private int fullscreenExitBaseRightMargin;
-    private ScaleGestureDetector scaleGestureDetector;
-    private float touchHoldMoveTolerancePx;
-    private float gestureAnchorX;
-    private float gestureAnchorY;
-    private boolean simulatedHoverActive;
-    private boolean consumeTouchUntilGestureEnd;
-    private boolean hoverModeArmedForClick;
-    private boolean hoverEnteredByHold;
-    private boolean flashTouchBridgeAvailable;
-    private boolean syntheticMouseHoverActive;
     private BrowserPreferenceStore preferenceStore;
     private LocalMappingManager localMappingManager;
     private CookieProfileManager cookieProfileManager;
     private BrowserSettingsController browserSettingsController;
     private BrowserRequestController browserRequestController;
+    private BrowserTouchController browserTouchController;
     private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
     private final FeaturePanelUiController featurePanelUiController = new FeaturePanelUiController();
     private FeaturePanelCookieController featurePanelCookieController;
@@ -193,21 +184,6 @@ public class MainActivity extends AppCompatActivity {
     private TextView featurePanelQueueLogText;
     private final ArrayList<FeatureCookieChoice> featureCookieChoices = new ArrayList<>();
     private WarehouseRecordManager warehouseRecordManager;
-    private final Runnable hoverHoldRunnable = () -> {
-        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", true);
-        if (dispatchSyntheticMouseHover(gestureAnchorX, gestureAnchorY, true)) {
-            simulatedHoverActive = true;
-            consumeTouchUntilGestureEnd = true;
-            hoverModeArmedForClick = true;
-            hoverEnteredByHold = true;
-        }
-    };
-    private final Runnable menuHoldRunnable = () -> {
-        if (dispatchTouchBridgeCall("contextMenuAt", gestureAnchorX, gestureAnchorY)) {
-            consumeTouchUntilGestureEnd = true;
-        }
-    };
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
@@ -302,28 +278,7 @@ public class MainActivity extends AppCompatActivity {
         legacyYoukiaRedirectButton = findViewById(R.id.btn_legacy_youkia_redirect);
         captureInsetAwareBaseValues();
         installWindowInsetHandlers();
-        touchHoldMoveTolerancePx = getResources().getDisplayMetrics().density * TOUCH_HOLD_MOVE_TOLERANCE_DP;
-        wrapper.setHapticFeedbackEnabled(false);
-        wrapper.setOnLongClickListener(v -> true);
-        scaleGestureDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            @Override
-            public boolean onScale(ScaleGestureDetector detector) {
-                float factor = detector.getScaleFactor();
-                if (Float.isNaN(factor) || Float.isInfinite(factor)) {
-                    return false;
-                }
-
-                factor = Math.max(0.75f, Math.min(1.25f, factor));
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    wrapper.zoomBy(factor);
-                } else if (factor > 1.02f) {
-                    wrapper.zoomIn();
-                } else if (factor < 0.98f) {
-                    wrapper.zoomOut();
-                }
-                return true;
-            }
-        });
+        browserTouchController = new BrowserTouchController(this, wrapper);
 
         findViewById(R.id.btn_back).setOnClickListener(v -> {
             if (wrapper.canGoBack()) {
@@ -372,7 +327,7 @@ public class MainActivity extends AppCompatActivity {
             urlInput.setText(DEFAULT_URL);
             loadUrl(DEFAULT_URL);
         }
-        wrapper.setOnTouchListener((v, event) -> handleWebViewTouch(event));
+        wrapper.setOnTouchListener((v, event) -> browserTouchController.handleTouch(event));
     }
 
     @Override
@@ -534,7 +489,7 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageStarted(view, url, favicon);
                 resetFullscreenStateForNavigation();
                 hideLegacyYoukiaRedirectPrompt();
-                flashTouchBridgeAvailable = false;
+                browserTouchController.resetBridgeAvailability();
                 progressBar.setVisibility(View.VISIBLE);
                 updateUrlInput(url);
             }
@@ -543,8 +498,8 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 ensureFullscreenStateMatchesPage();
-                refreshFlashTouchBridgeAvailability();
-                wrapper.postDelayed(MainActivity.this::refreshFlashTouchBridgeAvailability, 600L);
+                browserTouchController.refreshBridgeAvailability();
+                wrapper.postDelayed(browserTouchController::refreshBridgeAvailability, 600L);
                 updateLegacyYoukiaRedirectPrompt(url);
                 updateUrlInput(url);
                 if (progressBar.getProgress() >= 100) {
@@ -1280,382 +1235,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private boolean handleWebViewTouch(MotionEvent event) {
-        if (event == null || scaleGestureDetector == null) {
-            return false;
-        }
-
-        if (isSyntheticMouseEvent(event)) {
-            return false;
-        }
-
-        scaleGestureDetector.onTouchEvent(event);
-        boolean shouldConsume = scaleGestureDetector.isInProgress() || consumeTouchUntilGestureEnd;
-
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                cancelPendingTouchGestures();
-                dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
-                simulatedHoverActive = false;
-                consumeTouchUntilGestureEnd = false;
-                hoverModeArmedForClick = false;
-                hoverEnteredByHold = false;
-                syntheticMouseHoverActive = false;
-                gestureAnchorX = event.getX();
-                gestureAnchorY = event.getY();
-                wrapper.postDelayed(hoverHoldRunnable, HOVER_HOLD_MS);
-                break;
-            case MotionEvent.ACTION_POINTER_DOWN:
-                cancelPendingTouchGestures();
-                if (simulatedHoverActive) {
-                    dispatchSyntheticMouseExit(event.getX(), event.getY());
-                    dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
-                    simulatedHoverActive = false;
-                    hoverModeArmedForClick = false;
-                    hoverEnteredByHold = false;
-                    syntheticMouseHoverActive = false;
-                }
-                if (event.getPointerCount() >= 2) {
-                    gestureAnchorX = averageTouchX(event);
-                    gestureAnchorY = averageTouchY(event);
-                    wrapper.postDelayed(menuHoldRunnable, MENU_HOLD_MS);
-                }
-                shouldConsume = true;
-                break;
-            case MotionEvent.ACTION_MOVE:
-                if (scaleGestureDetector.isInProgress()) {
-                    cancelPendingTouchGestures();
-                    if (simulatedHoverActive) {
-                        dispatchSyntheticMouseExit(event.getX(), event.getY());
-                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
-                        simulatedHoverActive = false;
-                        syntheticMouseHoverActive = false;
-                    }
-                    hoverModeArmedForClick = false;
-                    hoverEnteredByHold = false;
-                    shouldConsume = true;
-                    break;
-                }
-
-                if (simulatedHoverActive && event.getPointerCount() == 1) {
-                    dispatchSyntheticMouseHover(event.getX(), event.getY(), false);
-                    hoverModeArmedForClick = true;
-                    shouldConsume = true;
-                    break;
-                }
-
-                if (movedBeyondTouchTolerance(event)) {
-                    cancelPendingTouchGestures();
-                    if (event.getPointerCount() == 1 && !simulatedHoverActive) {
-                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", true);
-                        dispatchSyntheticMouseHover(event.getX(), event.getY(), true);
-                        simulatedHoverActive = true;
-                        consumeTouchUntilGestureEnd = true;
-                        hoverModeArmedForClick = true;
-                        hoverEnteredByHold = false;
-                        syntheticMouseHoverActive = true;
-                        shouldConsume = true;
-                    }
-                }
-                shouldConsume = shouldConsume || event.getPointerCount() >= 2;
-                break;
-            case MotionEvent.ACTION_POINTER_UP:
-                cancelPendingTouchGestures();
-                hoverModeArmedForClick = false;
-                hoverEnteredByHold = false;
-                shouldConsume = true;
-                break;
-            case MotionEvent.ACTION_UP:
-                cancelPendingTouchGestures();
-                if (simulatedHoverActive) {
-                    if (hoverModeArmedForClick && !hoverEnteredByHold) {
-                        dispatchSyntheticMouseHover(event.getX(), event.getY(), false);
-                        dispatchSyntheticMouseClick(event.getX(), event.getY());
-                        dispatchSyntheticMouseExit(event.getX(), event.getY());
-                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
-                        simulatedHoverActive = false;
-                    } else if (!hoverEnteredByHold) {
-                        dispatchSyntheticMouseExit(event.getX(), event.getY());
-                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
-                        simulatedHoverActive = false;
-                    } else {
-                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
-                    }
-                }
-                shouldConsume = shouldConsume || consumeTouchUntilGestureEnd || hoverModeArmedForClick;
-                consumeTouchUntilGestureEnd = false;
-                hoverModeArmedForClick = false;
-                hoverEnteredByHold = false;
-                syntheticMouseHoverActive = false;
-                break;
-            case MotionEvent.ACTION_CANCEL:
-                cancelPendingTouchGestures();
-                if (simulatedHoverActive) {
-                    dispatchSyntheticMouseExit(event.getX(), event.getY());
-                    dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
-                    simulatedHoverActive = false;
-                    syntheticMouseHoverActive = false;
-                }
-                shouldConsume = shouldConsume || consumeTouchUntilGestureEnd;
-                consumeTouchUntilGestureEnd = false;
-                hoverModeArmedForClick = false;
-                hoverEnteredByHold = false;
-                break;
-            default:
-                shouldConsume = shouldConsume || event.getPointerCount() >= 2;
-                break;
-        }
-
-        return shouldConsume || event.getPointerCount() >= 2;
-    }
-
-    private void cancelPendingTouchGestures() {
-        if (wrapper == null) {
-            return;
-        }
-        wrapper.removeCallbacks(hoverHoldRunnable);
-        wrapper.removeCallbacks(menuHoldRunnable);
-    }
-
-    private boolean isSyntheticMouseEvent(MotionEvent event) {
-        if (event == null || event.getPointerCount() <= 0) {
-            return false;
-        }
-        return ((event.getSource() & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE)
-                || event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE;
-    }
-
-    private boolean dispatchSyntheticMouseHover(float x, float y, boolean entering) {
-        if (wrapper == null) {
-            return false;
-        }
-        long now = SystemClock.uptimeMillis();
-        if (entering || !syntheticMouseHoverActive) {
-            MotionEvent enterEvent = obtainMouseMotionEvent(
-                    now,
-                    now,
-                    MotionEvent.ACTION_HOVER_ENTER,
-                    x,
-                    y,
-                    0
-            );
-            wrapper.dispatchGenericMotionEvent(enterEvent);
-            enterEvent.recycle();
-            syntheticMouseHoverActive = true;
-        }
-
-        MotionEvent hoverEvent = obtainMouseMotionEvent(
-                now,
-                now,
-                MotionEvent.ACTION_HOVER_MOVE,
-                x,
-                y,
-                0
-        );
-        wrapper.dispatchGenericMotionEvent(hoverEvent);
-        hoverEvent.recycle();
-        return true;
-    }
-
-    private boolean dispatchSyntheticMouseClick(float x, float y) {
-        if (wrapper == null) {
-            return false;
-        }
-        long downTime = SystemClock.uptimeMillis();
-        long upTime = downTime + 16L;
-
-        MotionEvent downEvent = obtainMouseMotionEvent(
-                downTime,
-                downTime,
-                MotionEvent.ACTION_DOWN,
-                x,
-                y,
-                MotionEvent.BUTTON_PRIMARY
-        );
-        wrapper.dispatchTouchEvent(downEvent);
-        downEvent.recycle();
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            MotionEvent buttonPressEvent = obtainMouseMotionEvent(
-                    downTime,
-                    downTime,
-                    MotionEvent.ACTION_BUTTON_PRESS,
-                    x,
-                    y,
-                    MotionEvent.BUTTON_PRIMARY
-            );
-            wrapper.dispatchGenericMotionEvent(buttonPressEvent);
-            buttonPressEvent.recycle();
-        }
-
-        MotionEvent upEvent = obtainMouseMotionEvent(
-                downTime,
-                upTime,
-                MotionEvent.ACTION_UP,
-                x,
-                y,
-                0
-        );
-        wrapper.dispatchTouchEvent(upEvent);
-        upEvent.recycle();
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            MotionEvent buttonReleaseEvent = obtainMouseMotionEvent(
-                    downTime,
-                    upTime,
-                    MotionEvent.ACTION_BUTTON_RELEASE,
-                    x,
-                    y,
-                    MotionEvent.BUTTON_PRIMARY
-            );
-            wrapper.dispatchGenericMotionEvent(buttonReleaseEvent);
-            buttonReleaseEvent.recycle();
-        }
-        return true;
-    }
-
-    private boolean dispatchSyntheticMouseExit(float x, float y) {
-        if (wrapper == null || !syntheticMouseHoverActive) {
-            return false;
-        }
-        long now = SystemClock.uptimeMillis();
-        MotionEvent exitEvent = obtainMouseMotionEvent(
-                now,
-                now,
-                MotionEvent.ACTION_HOVER_EXIT,
-                x,
-                y,
-                0
-        );
-        wrapper.dispatchGenericMotionEvent(exitEvent);
-        exitEvent.recycle();
-        syntheticMouseHoverActive = false;
-        return true;
-    }
-
-    private MotionEvent obtainMouseMotionEvent(
-            long downTime,
-            long eventTime,
-            int action,
-            float x,
-            float y,
-            int buttonState
-    ) {
-        MotionEvent.PointerProperties pointerProperties = new MotionEvent.PointerProperties();
-        pointerProperties.id = 0;
-        pointerProperties.toolType = MotionEvent.TOOL_TYPE_MOUSE;
-
-        MotionEvent.PointerCoords pointerCoords = new MotionEvent.PointerCoords();
-        pointerCoords.x = x;
-        pointerCoords.y = y;
-        pointerCoords.pressure = buttonState == 0 ? 0f : 1f;
-        pointerCoords.size = 1f;
-
-        return MotionEvent.obtain(
-                downTime,
-                eventTime,
-                action,
-                1,
-                new MotionEvent.PointerProperties[]{pointerProperties},
-                new MotionEvent.PointerCoords[]{pointerCoords},
-                0,
-                buttonState,
-                1f,
-                1f,
-                0,
-                0,
-                InputDevice.SOURCE_MOUSE,
-                0
-        );
-    }
-
-    private boolean shouldDispatchTapClick(MotionEvent event) {
-        return flashTouchBridgeAvailable
-                && event != null
-                && event.getPointerCount() == 1
-                && !scaleGestureDetector.isInProgress()
-                && !movedBeyondTouchTolerance(event);
-    }
-
-    private boolean movedBeyondTouchTolerance(MotionEvent event) {
-        if (event == null) {
-            return false;
-        }
-        float x = event.getPointerCount() >= 2 ? averageTouchX(event) : event.getX();
-        float y = event.getPointerCount() >= 2 ? averageTouchY(event) : event.getY();
-        float dx = x - gestureAnchorX;
-        float dy = y - gestureAnchorY;
-        return (dx * dx) + (dy * dy) > touchHoldMoveTolerancePx * touchHoldMoveTolerancePx;
-    }
-
-    private float averageTouchX(MotionEvent event) {
-        float sum = 0f;
-        int count = event.getPointerCount();
-        for (int i = 0; i < count; i += 1) {
-            sum += event.getX(i);
-        }
-        return count <= 0 ? 0f : sum / count;
-    }
-
-    private float averageTouchY(MotionEvent event) {
-        float sum = 0f;
-        int count = event.getPointerCount();
-        for (int i = 0; i < count; i += 1) {
-            sum += event.getY(i);
-        }
-        return count <= 0 ? 0f : sum / count;
-    }
-
-    private boolean dispatchTouchBridgeCall(String method, float x, float y) {
-        if (wrapper == null || TextUtils.isEmpty(method)) {
-            return false;
-        }
-        String script = "(function(){var bridge=window.__ruffleWrapperTouchBridge;"
-                + "return !!(bridge&&bridge." + method + "&&bridge." + method + "(" + x + "," + y + "));})();";
-        wrapper.evaluateJavascript(script, value -> { });
-        return true;
-    }
-
-    private boolean dispatchTouchBridgeSimpleCall(String method) {
-        if (wrapper == null || TextUtils.isEmpty(method)) {
-            return false;
-        }
-        String script = "(function(){var bridge=window.__ruffleWrapperTouchBridge;"
-                + "return !!(bridge&&bridge." + method + "&&bridge." + method + "());})();";
-        wrapper.evaluateJavascript(script, value -> { });
-        return true;
-    }
-
-    private boolean dispatchTouchBridgeBooleanCall(String method, boolean value) {
-        if (wrapper == null || TextUtils.isEmpty(method)) {
-            return false;
-        }
-        String script = "(function(){var bridge=window.__ruffleWrapperTouchBridge;"
-                + "return !!(bridge&&bridge." + method + "&&bridge." + method + "(" + value + "));})();";
-        wrapper.evaluateJavascript(script, result -> { });
-        return true;
-    }
-
-    private void refreshFlashTouchBridgeAvailability() {
-        if (wrapper == null) {
-            flashTouchBridgeAvailable = false;
-            return;
-        }
-
-        String script =
-                "(function(){"
-                        + "return !!document.querySelector("
-                        + "'ruffle-player,ruffle-embed,ruffle-object,"
-                        + "embed[type*=\\\"shockwave\\\"],object[type*=\\\"shockwave\\\"],"
-                        + "embed[src*=\\\".swf\\\"],object[data*=\\\".swf\\\"]'"
-                        + ");"
-                        + "})();";
-        wrapper.evaluateJavascript(script, value -> {
-            String normalized = value == null ? "" : value.replace("\"", "").trim();
-            flashTouchBridgeAvailable = "true".equalsIgnoreCase(normalized);
-        });
-    }
-
     private void showFeaturePanelDialog() {
         if (featurePanelDialog != null && featurePanelDialog.isShowing()) {
             return;
@@ -2177,6 +1756,415 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+}
+
+final class BrowserTouchController {
+    private static final long HOVER_HOLD_MS = 450L;
+    private static final long MENU_HOLD_MS = 700L;
+    private static final float TOUCH_HOLD_MOVE_TOLERANCE_DP = 18f;
+
+    private final AppCompatActivity activity;
+    private final WebView webView;
+    private final ScaleGestureDetector scaleGestureDetector;
+    private final float touchHoldMoveTolerancePx;
+
+    private float gestureAnchorX;
+    private float gestureAnchorY;
+    private boolean simulatedHoverActive;
+    private boolean consumeTouchUntilGestureEnd;
+    private boolean hoverModeArmedForClick;
+    private boolean hoverEnteredByHold;
+    private boolean flashTouchBridgeAvailable;
+    private boolean syntheticMouseHoverActive;
+
+    private final Runnable hoverHoldRunnable = () -> {
+        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", true);
+        if (dispatchSyntheticMouseHover(gestureAnchorX, gestureAnchorY, true)) {
+            simulatedHoverActive = true;
+            consumeTouchUntilGestureEnd = true;
+            hoverModeArmedForClick = true;
+            hoverEnteredByHold = true;
+        }
+    };
+    private final Runnable menuHoldRunnable = () -> {
+        if (dispatchTouchBridgeCall("contextMenuAt", gestureAnchorX, gestureAnchorY)) {
+            consumeTouchUntilGestureEnd = true;
+        }
+    };
+
+    BrowserTouchController(AppCompatActivity activity, WebView webView) {
+        this.activity = activity;
+        this.webView = webView;
+        this.touchHoldMoveTolerancePx =
+                activity.getResources().getDisplayMetrics().density * TOUCH_HOLD_MOVE_TOLERANCE_DP;
+        this.scaleGestureDetector =
+                new ScaleGestureDetector(activity, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                    @Override
+                    public boolean onScale(ScaleGestureDetector detector) {
+                        float factor = detector.getScaleFactor();
+                        if (Float.isNaN(factor) || Float.isInfinite(factor)) {
+                            return false;
+                        }
+
+                        factor = Math.max(0.75f, Math.min(1.25f, factor));
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            BrowserTouchController.this.webView.zoomBy(factor);
+                        } else if (factor > 1.02f) {
+                            BrowserTouchController.this.webView.zoomIn();
+                        } else if (factor < 0.98f) {
+                            BrowserTouchController.this.webView.zoomOut();
+                        }
+                        return true;
+                    }
+                });
+        this.webView.setHapticFeedbackEnabled(false);
+        this.webView.setOnLongClickListener(v -> true);
+    }
+
+    boolean handleTouch(MotionEvent event) {
+        if (event == null) {
+            return false;
+        }
+
+        if (isSyntheticMouseEvent(event)) {
+            return false;
+        }
+
+        scaleGestureDetector.onTouchEvent(event);
+        boolean shouldConsume = scaleGestureDetector.isInProgress() || consumeTouchUntilGestureEnd;
+
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                cancelPendingTouchGestures();
+                dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
+                simulatedHoverActive = false;
+                consumeTouchUntilGestureEnd = false;
+                hoverModeArmedForClick = false;
+                hoverEnteredByHold = false;
+                syntheticMouseHoverActive = false;
+                gestureAnchorX = event.getX();
+                gestureAnchorY = event.getY();
+                webView.postDelayed(hoverHoldRunnable, HOVER_HOLD_MS);
+                break;
+            case MotionEvent.ACTION_POINTER_DOWN:
+                cancelPendingTouchGestures();
+                if (simulatedHoverActive) {
+                    dispatchSyntheticMouseExit(event.getX(), event.getY());
+                    dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
+                    simulatedHoverActive = false;
+                    hoverModeArmedForClick = false;
+                    hoverEnteredByHold = false;
+                    syntheticMouseHoverActive = false;
+                }
+                if (event.getPointerCount() >= 2) {
+                    gestureAnchorX = averageTouchX(event);
+                    gestureAnchorY = averageTouchY(event);
+                    webView.postDelayed(menuHoldRunnable, MENU_HOLD_MS);
+                }
+                shouldConsume = true;
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (scaleGestureDetector.isInProgress()) {
+                    cancelPendingTouchGestures();
+                    if (simulatedHoverActive) {
+                        dispatchSyntheticMouseExit(event.getX(), event.getY());
+                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
+                        simulatedHoverActive = false;
+                        syntheticMouseHoverActive = false;
+                    }
+                    hoverModeArmedForClick = false;
+                    hoverEnteredByHold = false;
+                    shouldConsume = true;
+                    break;
+                }
+
+                if (simulatedHoverActive && event.getPointerCount() == 1) {
+                    dispatchSyntheticMouseHover(event.getX(), event.getY(), false);
+                    hoverModeArmedForClick = true;
+                    shouldConsume = true;
+                    break;
+                }
+
+                if (movedBeyondTouchTolerance(event)) {
+                    cancelPendingTouchGestures();
+                    if (event.getPointerCount() == 1 && !simulatedHoverActive) {
+                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", true);
+                        dispatchSyntheticMouseHover(event.getX(), event.getY(), true);
+                        simulatedHoverActive = true;
+                        consumeTouchUntilGestureEnd = true;
+                        hoverModeArmedForClick = true;
+                        hoverEnteredByHold = false;
+                        syntheticMouseHoverActive = true;
+                        shouldConsume = true;
+                    }
+                }
+                shouldConsume = shouldConsume || event.getPointerCount() >= 2;
+                break;
+            case MotionEvent.ACTION_POINTER_UP:
+                cancelPendingTouchGestures();
+                hoverModeArmedForClick = false;
+                hoverEnteredByHold = false;
+                shouldConsume = true;
+                break;
+            case MotionEvent.ACTION_UP:
+                cancelPendingTouchGestures();
+                if (simulatedHoverActive) {
+                    if (hoverModeArmedForClick && !hoverEnteredByHold) {
+                        dispatchSyntheticMouseHover(event.getX(), event.getY(), false);
+                        dispatchSyntheticMouseClick(event.getX(), event.getY());
+                        dispatchSyntheticMouseExit(event.getX(), event.getY());
+                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
+                        simulatedHoverActive = false;
+                    } else if (!hoverEnteredByHold) {
+                        dispatchSyntheticMouseExit(event.getX(), event.getY());
+                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
+                        simulatedHoverActive = false;
+                    } else {
+                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
+                    }
+                }
+                shouldConsume = shouldConsume || consumeTouchUntilGestureEnd || hoverModeArmedForClick;
+                consumeTouchUntilGestureEnd = false;
+                hoverModeArmedForClick = false;
+                hoverEnteredByHold = false;
+                syntheticMouseHoverActive = false;
+                break;
+            case MotionEvent.ACTION_CANCEL:
+                cancelPendingTouchGestures();
+                if (simulatedHoverActive) {
+                    dispatchSyntheticMouseExit(event.getX(), event.getY());
+                    dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", false);
+                    simulatedHoverActive = false;
+                    syntheticMouseHoverActive = false;
+                }
+                shouldConsume = shouldConsume || consumeTouchUntilGestureEnd;
+                consumeTouchUntilGestureEnd = false;
+                hoverModeArmedForClick = false;
+                hoverEnteredByHold = false;
+                break;
+            default:
+                shouldConsume = shouldConsume || event.getPointerCount() >= 2;
+                break;
+        }
+
+        return shouldConsume || event.getPointerCount() >= 2;
+    }
+
+    void resetBridgeAvailability() {
+        flashTouchBridgeAvailable = false;
+    }
+
+    void refreshBridgeAvailability() {
+        String script =
+                "(function(){"
+                        + "return !!document.querySelector("
+                        + "'ruffle-player,ruffle-embed,ruffle-object,"
+                        + "embed[type*=\\\"shockwave\\\"],object[type*=\\\"shockwave\\\"],"
+                        + "embed[src*=\\\".swf\\\"],object[data*=\\\".swf\\\"]'"
+                        + ");"
+                        + "})();";
+        webView.evaluateJavascript(script, value -> {
+            String normalized = value == null ? "" : value.replace("\"", "").trim();
+            flashTouchBridgeAvailable = "true".equalsIgnoreCase(normalized);
+        });
+    }
+
+    private void cancelPendingTouchGestures() {
+        webView.removeCallbacks(hoverHoldRunnable);
+        webView.removeCallbacks(menuHoldRunnable);
+    }
+
+    private boolean isSyntheticMouseEvent(MotionEvent event) {
+        if (event.getPointerCount() <= 0) {
+            return false;
+        }
+        return ((event.getSource() & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE)
+                || event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE;
+    }
+
+    private boolean dispatchSyntheticMouseHover(float x, float y, boolean entering) {
+        long now = SystemClock.uptimeMillis();
+        if (entering || !syntheticMouseHoverActive) {
+            MotionEvent enterEvent = obtainMouseMotionEvent(
+                    now,
+                    now,
+                    MotionEvent.ACTION_HOVER_ENTER,
+                    x,
+                    y,
+                    0
+            );
+            webView.dispatchGenericMotionEvent(enterEvent);
+            enterEvent.recycle();
+            syntheticMouseHoverActive = true;
+        }
+
+        MotionEvent hoverEvent = obtainMouseMotionEvent(
+                now,
+                now,
+                MotionEvent.ACTION_HOVER_MOVE,
+                x,
+                y,
+                0
+        );
+        webView.dispatchGenericMotionEvent(hoverEvent);
+        hoverEvent.recycle();
+        return true;
+    }
+
+    private boolean dispatchSyntheticMouseClick(float x, float y) {
+        long downTime = SystemClock.uptimeMillis();
+        long upTime = downTime + 16L;
+
+        MotionEvent downEvent = obtainMouseMotionEvent(
+                downTime,
+                downTime,
+                MotionEvent.ACTION_DOWN,
+                x,
+                y,
+                MotionEvent.BUTTON_PRIMARY
+        );
+        webView.dispatchTouchEvent(downEvent);
+        downEvent.recycle();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            MotionEvent buttonPressEvent = obtainMouseMotionEvent(
+                    downTime,
+                    downTime,
+                    MotionEvent.ACTION_BUTTON_PRESS,
+                    x,
+                    y,
+                    MotionEvent.BUTTON_PRIMARY
+            );
+            webView.dispatchGenericMotionEvent(buttonPressEvent);
+            buttonPressEvent.recycle();
+        }
+
+        MotionEvent upEvent = obtainMouseMotionEvent(
+                downTime,
+                upTime,
+                MotionEvent.ACTION_UP,
+                x,
+                y,
+                0
+        );
+        webView.dispatchTouchEvent(upEvent);
+        upEvent.recycle();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            MotionEvent buttonReleaseEvent = obtainMouseMotionEvent(
+                    downTime,
+                    upTime,
+                    MotionEvent.ACTION_BUTTON_RELEASE,
+                    x,
+                    y,
+                    MotionEvent.BUTTON_PRIMARY
+            );
+            webView.dispatchGenericMotionEvent(buttonReleaseEvent);
+            buttonReleaseEvent.recycle();
+        }
+        return true;
+    }
+
+    private boolean dispatchSyntheticMouseExit(float x, float y) {
+        if (!syntheticMouseHoverActive) {
+            return false;
+        }
+        long now = SystemClock.uptimeMillis();
+        MotionEvent exitEvent = obtainMouseMotionEvent(
+                now,
+                now,
+                MotionEvent.ACTION_HOVER_EXIT,
+                x,
+                y,
+                0
+        );
+        webView.dispatchGenericMotionEvent(exitEvent);
+        exitEvent.recycle();
+        syntheticMouseHoverActive = false;
+        return true;
+    }
+
+    private MotionEvent obtainMouseMotionEvent(
+            long downTime,
+            long eventTime,
+            int action,
+            float x,
+            float y,
+            int buttonState
+    ) {
+        MotionEvent.PointerProperties pointerProperties = new MotionEvent.PointerProperties();
+        pointerProperties.id = 0;
+        pointerProperties.toolType = MotionEvent.TOOL_TYPE_MOUSE;
+
+        MotionEvent.PointerCoords pointerCoords = new MotionEvent.PointerCoords();
+        pointerCoords.x = x;
+        pointerCoords.y = y;
+        pointerCoords.pressure = buttonState == 0 ? 0f : 1f;
+        pointerCoords.size = 1f;
+
+        return MotionEvent.obtain(
+                downTime,
+                eventTime,
+                action,
+                1,
+                new MotionEvent.PointerProperties[]{pointerProperties},
+                new MotionEvent.PointerCoords[]{pointerCoords},
+                0,
+                buttonState,
+                1f,
+                1f,
+                0,
+                0,
+                InputDevice.SOURCE_MOUSE,
+                0
+        );
+    }
+
+    private boolean movedBeyondTouchTolerance(MotionEvent event) {
+        float x = event.getPointerCount() >= 2 ? averageTouchX(event) : event.getX();
+        float y = event.getPointerCount() >= 2 ? averageTouchY(event) : event.getY();
+        float dx = x - gestureAnchorX;
+        float dy = y - gestureAnchorY;
+        return (dx * dx) + (dy * dy) > touchHoldMoveTolerancePx * touchHoldMoveTolerancePx;
+    }
+
+    private float averageTouchX(MotionEvent event) {
+        float sum = 0f;
+        int count = event.getPointerCount();
+        for (int i = 0; i < count; i += 1) {
+            sum += event.getX(i);
+        }
+        return count <= 0 ? 0f : sum / count;
+    }
+
+    private float averageTouchY(MotionEvent event) {
+        float sum = 0f;
+        int count = event.getPointerCount();
+        for (int i = 0; i < count; i += 1) {
+            sum += event.getY(i);
+        }
+        return count <= 0 ? 0f : sum / count;
+    }
+
+    private boolean dispatchTouchBridgeCall(String method, float x, float y) {
+        if (TextUtils.isEmpty(method)) {
+            return false;
+        }
+        String script = "(function(){var bridge=window.__ruffleWrapperTouchBridge;"
+                + "return !!(bridge&&bridge." + method + "&&bridge." + method + "(" + x + "," + y + "));})();";
+        webView.evaluateJavascript(script, value -> { });
+        return true;
+    }
+
+    private boolean dispatchTouchBridgeBooleanCall(String method, boolean value) {
+        if (TextUtils.isEmpty(method)) {
+            return false;
+        }
+        String script = "(function(){var bridge=window.__ruffleWrapperTouchBridge;"
+                + "return !!(bridge&&bridge." + method + "&&bridge." + method + "(" + value + "));})();";
+        webView.evaluateJavascript(script, result -> { });
+        return true;
+    }
 }
 
 final class BrowserRequestController {
