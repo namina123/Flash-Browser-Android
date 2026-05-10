@@ -120,11 +120,10 @@ public class MainActivity extends AppCompatActivity {
     private BrowserSettingsController browserSettingsController;
     private BrowserRequestController browserRequestController;
     private BrowserFullscreenController browserFullscreenController;
+    private BrowserNavigationController browserNavigationController;
     private BrowserTouchController browserTouchController;
     private FeaturePanelDialogController featurePanelDialogController;
     private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
-    private String pendingLegacyYoukiaSourceUrl;
-    private String pendingLegacyYoukiaTargetUrl;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
@@ -160,12 +159,16 @@ public class MainActivity extends AppCompatActivity {
 
                     @Override
                     public void updateUrlInput(String url) {
-                        MainActivity.this.updateUrlInput(url);
+                        if (browserNavigationController != null) {
+                            browserNavigationController.updateUrlInput(url);
+                        }
                     }
 
                     @Override
                     public void loadUrl(String url) {
-                        MainActivity.this.loadUrl(url);
+                        if (browserNavigationController != null) {
+                            browserNavigationController.loadUrl(url);
+                        }
                     }
 
                     @Override
@@ -208,6 +211,13 @@ public class MainActivity extends AppCompatActivity {
         fullscreenExitButton = findViewById(R.id.btn_exit_fullscreen);
         fullscreenFeaturePanelButton = findViewById(R.id.btn_feature_panel_fullscreen);
         legacyYoukiaRedirectButton = findViewById(R.id.btn_legacy_youkia_redirect);
+        browserNavigationController = new BrowserNavigationController(
+                this,
+                wrapper,
+                urlInput,
+                progressBar,
+                legacyYoukiaRedirectButton
+        );
         browserFullscreenController = new BrowserFullscreenController(
                 this,
                 wrapper,
@@ -233,24 +243,16 @@ public class MainActivity extends AppCompatActivity {
         );
         dutyRequestQueue.setListener(snapshot -> runOnUiThread(() -> featurePanelDialogController.renderQueueState(snapshot)));
 
-        findViewById(R.id.btn_back).setOnClickListener(v -> {
-            if (wrapper.canGoBack()) {
-                wrapper.goBack();
-            }
-        });
+        findViewById(R.id.btn_back).setOnClickListener(v -> browserNavigationController.goBackIfPossible());
 
-        findViewById(R.id.btn_forward).setOnClickListener(v -> {
-            if (wrapper.canGoForward()) {
-                wrapper.goForward();
-            }
-        });
+        findViewById(R.id.btn_forward).setOnClickListener(v -> browserNavigationController.goForwardIfPossible());
 
-        findViewById(R.id.btn_refresh).setOnClickListener(v -> wrapper.reload());
+        findViewById(R.id.btn_refresh).setOnClickListener(v -> browserNavigationController.reload());
         findViewById(R.id.btn_go).setOnClickListener(v -> featurePanelDialogController.show());
         findViewById(R.id.btn_fullscreen).setOnClickListener(v -> browserFullscreenController.toggleRuffleFullscreenCompat());
         findViewById(R.id.btn_save_cookie).setOnClickListener(v -> browserSettingsController.saveCurrentCookieProfile());
         fullscreenFeaturePanelButton.setOnClickListener(v -> featurePanelDialogController.toggle());
-        legacyYoukiaRedirectButton.setOnClickListener(v -> performPendingLegacyYoukiaRedirect());
+        legacyYoukiaRedirectButton.setOnClickListener(v -> browserNavigationController.performPendingLegacyYoukiaRedirect());
         fullscreenRotateButton.setOnClickListener(v -> browserFullscreenController.rotateFullscreenOrientation());
         fullscreenExitButton.setOnClickListener(v -> browserFullscreenController.handleExitButtonClick());
         findViewById(R.id.btn_settings).setOnClickListener(browserSettingsController::showSettingsMenu);
@@ -260,7 +262,7 @@ public class MainActivity extends AppCompatActivity {
                     && event.getAction() == KeyEvent.ACTION_DOWN
                     && event.getKeyCode() == KeyEvent.KEYCODE_ENTER;
             if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_DONE || enterPressed) {
-                loadFromInput();
+                browserNavigationController.loadFromInput();
                 return true;
             }
             return false;
@@ -269,10 +271,10 @@ public class MainActivity extends AppCompatActivity {
         setupWebView();
         if (savedInstanceState != null && wrapper.restoreState(savedInstanceState) != null) {
             String restoredUrl = wrapper.getUrl();
-            updateUrlInput(TextUtils.isEmpty(restoredUrl) ? DEFAULT_URL : restoredUrl);
+            browserNavigationController.updateUrlInput(TextUtils.isEmpty(restoredUrl) ? DEFAULT_URL : restoredUrl);
         } else {
-            urlInput.setText(DEFAULT_URL);
-            loadUrl(DEFAULT_URL);
+            browserNavigationController.updateUrlInput(DEFAULT_URL);
+            browserNavigationController.loadUrl(DEFAULT_URL);
         }
         wrapper.setOnTouchListener((v, event) -> browserTouchController.handleTouch(event));
     }
@@ -338,10 +340,8 @@ public class MainActivity extends AppCompatActivity {
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 browserFullscreenController.resetForNavigation();
-                hideLegacyYoukiaRedirectPrompt();
                 browserTouchController.resetBridgeAvailability();
-                progressBar.setVisibility(View.VISIBLE);
-                updateUrlInput(url);
+                browserNavigationController.onPageStarted(url);
             }
 
             @Override
@@ -350,11 +350,7 @@ public class MainActivity extends AppCompatActivity {
                 browserFullscreenController.ensureStateMatchesPage();
                 browserTouchController.refreshBridgeAvailability();
                 wrapper.postDelayed(browserTouchController::refreshBridgeAvailability, 600L);
-                updateLegacyYoukiaRedirectPrompt(url);
-                updateUrlInput(url);
-                if (progressBar.getProgress() >= 100) {
-                    progressBar.setVisibility(View.GONE);
-                }
+                browserNavigationController.onPageFinished(url);
             }
 
             @Override
@@ -386,11 +382,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onProgressChanged(WebView view, int newProgress) {
                 super.onProgressChanged(view, newProgress);
-                progressBar.setProgress(newProgress);
-                progressBar.setVisibility(newProgress >= 100 ? View.GONE : View.VISIBLE);
-                if (newProgress >= 100) {
-                    updateUrlInput(view.getUrl());
-                }
+                browserNavigationController.onProgressChanged(view.getUrl(), newProgress);
             }
 
             @Override
@@ -444,99 +436,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void loadFromInput() {
-        String rawInput = urlInput.getText() == null ? "" : urlInput.getText().toString().trim();
-        if (rawInput.isEmpty()) {
-            return;
-        }
-
-        String targetUrl = normalizeInputToUrl(rawInput);
-        updateUrlInput(targetUrl);
-        hideKeyboard();
-        wrapper.requestFocus();
-        loadUrl(targetUrl);
-    }
-
-    private void loadUrl(String url) {
-        wrapper.loadUrl(url);
-    }
-
-    private void copyCookiesForRedirect(String sourceUrl, String targetUrl) {
-        if (TextUtils.isEmpty(sourceUrl) || TextUtils.isEmpty(targetUrl)) {
-            return;
-        }
-
-        try {
-            CookieManager cookieManager = CookieManager.getInstance();
-            String cookies = cookieManager.getCookie(sourceUrl);
-            if (TextUtils.isEmpty(cookies)) {
-                return;
-            }
-            cookieManager.setCookie(targetUrl, cookies);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                cookieManager.flush();
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to copy cookies during redirect: " + sourceUrl + " -> " + targetUrl, e);
-        }
-    }
-
-    private void updateLegacyYoukiaRedirectPrompt(String currentUrl) {
-        String targetUrl = resolveSpecialYoukiaRedirectTarget(currentUrl);
-        if (TextUtils.isEmpty(targetUrl) || TextUtils.equals(currentUrl, targetUrl)) {
-            hideLegacyYoukiaRedirectPrompt();
-            return;
-        }
-
-        pendingLegacyYoukiaSourceUrl = currentUrl;
-        pendingLegacyYoukiaTargetUrl = targetUrl;
-        if (legacyYoukiaRedirectButton != null) {
-            legacyYoukiaRedirectButton.setVisibility(View.VISIBLE);
-        }
-    }
-
-    private void hideLegacyYoukiaRedirectPrompt() {
-        pendingLegacyYoukiaSourceUrl = null;
-        pendingLegacyYoukiaTargetUrl = null;
-        if (legacyYoukiaRedirectButton != null) {
-            legacyYoukiaRedirectButton.setVisibility(View.GONE);
-        }
-    }
-
-    private void performPendingLegacyYoukiaRedirect() {
-        String sourceUrl = pendingLegacyYoukiaSourceUrl;
-        String targetUrl = pendingLegacyYoukiaTargetUrl;
-        hideLegacyYoukiaRedirectPrompt();
-        if (TextUtils.isEmpty(sourceUrl) || TextUtils.isEmpty(targetUrl)) {
-            return;
-        }
-        copyCookiesForRedirect(sourceUrl, targetUrl);
-        wrapper.loadUrl(targetUrl);
-    }
-
-    private String resolveSpecialYoukiaRedirectTarget(String rawUrl) {
-        if (TextUtils.isEmpty(rawUrl)) {
-            return null;
-        }
-
-        try {
-            Uri uri = Uri.parse(rawUrl);
-            if (!CookieProfileManager.isLegacyYoukiaLandingPage(uri)) {
-                return null;
-            }
-
-            String subdomain = CookieProfileManager.extractLegacyYoukiaSubdomain(uri);
-            if (TextUtils.isEmpty(subdomain)) {
-                return null;
-            }
-
-            return "http://" + subdomain + ".youkia.pvz.youkia.com/pvz/index.php/default/main";
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to rewrite youkia url: " + rawUrl, e);
-            return null;
-        }
-    }
-
     private void openManualRuffleTest(boolean useProxy) {
         String sourceUrl = resolveManualTestSwfUrl();
         String loadTarget = useProxy ? buildProxyUrl(sourceUrl) : sourceUrl;
@@ -548,18 +447,17 @@ public class MainActivity extends AppCompatActivity {
         String baseUrl = useProxy ? MANUAL_TEST_PROXY_BASE_URL : buildManualDirectBaseUrl(sourceUrl);
         String html = buildManualRuffleTestHtml(sourceUrl, loadTarget, useProxy);
 
-        hideKeyboard();
-        wrapper.requestFocus();
+        browserNavigationController.hideKeyboard();
+        browserNavigationController.focusWebView();
         wrapper.loadDataWithBaseURL(baseUrl, html, "text/html", StandardCharsets.UTF_8.name(), null);
-        urlInput.setText((useProxy ? "manual-proxy: " : "manual-direct: ") + sourceUrl);
-        urlInput.setSelection(urlInput.getText().length());
+        browserNavigationController.setUrlInputText((useProxy ? "manual-proxy: " : "manual-direct: ") + sourceUrl);
         Toast.makeText(this, useProxy ? "Opened manual proxy test" : "Opened manual direct test", Toast.LENGTH_SHORT).show();
     }
 
     private String resolveManualTestSwfUrl() {
         String rawInput = urlInput.getText() == null ? "" : urlInput.getText().toString().trim();
         if (isLikelySwfUrl(rawInput)) {
-            return normalizeInputToUrl(rawInput);
+            return browserNavigationController.normalizeInputToUrl(rawInput);
         }
 
         String currentUrl = wrapper == null ? null : wrapper.getUrl();
@@ -858,46 +756,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private String normalizeInputToUrl(String rawInput) {
-        if (Patterns.WEB_URL.matcher(rawInput).matches()) {
-            return ensureScheme(rawInput);
-        }
-
-        Uri parsed = Uri.parse(rawInput);
-        if (parsed.getScheme() != null) {
-            return rawInput;
-        }
-
-        if (rawInput.contains(".") && !rawInput.contains(" ")) {
-            return "https://" + rawInput;
-        }
-
-        return "https://www.google.com/search?q=" + Uri.encode(rawInput);
-    }
-
-    private String ensureScheme(String value) {
-        Uri uri = Uri.parse(value);
-        if (uri.getScheme() != null) {
-            return value;
-        }
-        return "https://" + value;
-    }
-
-    private void updateUrlInput(String url) {
-        if (TextUtils.isEmpty(url) || urlInput.hasFocus()) {
-            return;
-        }
-        urlInput.setText(url);
-        urlInput.setSelection(urlInput.getText().length());
-    }
-
-    private void hideKeyboard() {
-        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-        if (imm != null) {
-            imm.hideSoftInputFromWindow(urlInput.getWindowToken(), 0);
-        }
-    }
-
     private void requestAllFilesAccessPermission() {
         try {
             Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
@@ -962,13 +820,230 @@ public class MainActivity extends AppCompatActivity {
         if (browserFullscreenController.handleBackPressed()) {
             return;
         }
-        if (wrapper.canGoBack()) {
-            wrapper.goBack();
+        if (browserNavigationController.canGoBack()) {
+            browserNavigationController.goBackIfPossible();
         } else {
             finish();
         }
     }
 
+}
+
+final class BrowserNavigationController {
+    private static final String TAG = "FlashBrowser";
+
+    private final AppCompatActivity activity;
+    private final WebView webView;
+    private final EditText urlInput;
+    private final ProgressBar progressBar;
+    private final Button legacyYoukiaRedirectButton;
+    private String pendingLegacyYoukiaSourceUrl;
+    private String pendingLegacyYoukiaTargetUrl;
+
+    BrowserNavigationController(
+            AppCompatActivity activity,
+            WebView webView,
+            EditText urlInput,
+            ProgressBar progressBar,
+            Button legacyYoukiaRedirectButton
+    ) {
+        this.activity = activity;
+        this.webView = webView;
+        this.urlInput = urlInput;
+        this.progressBar = progressBar;
+        this.legacyYoukiaRedirectButton = legacyYoukiaRedirectButton;
+    }
+
+    void goBackIfPossible() {
+        if (webView.canGoBack()) {
+            webView.goBack();
+        }
+    }
+
+    void goForwardIfPossible() {
+        if (webView.canGoForward()) {
+            webView.goForward();
+        }
+    }
+
+    void reload() {
+        webView.reload();
+    }
+
+    boolean canGoBack() {
+        return webView.canGoBack();
+    }
+
+    void loadFromInput() {
+        String rawInput = urlInput.getText() == null ? "" : urlInput.getText().toString().trim();
+        if (rawInput.isEmpty()) {
+            return;
+        }
+
+        String targetUrl = normalizeInputToUrl(rawInput);
+        updateUrlInput(targetUrl);
+        hideKeyboard();
+        focusWebView();
+        loadUrl(targetUrl);
+    }
+
+    void loadUrl(String url) {
+        webView.loadUrl(url);
+    }
+
+    void onPageStarted(String url) {
+        hideLegacyYoukiaRedirectPrompt();
+        if (progressBar != null) {
+            progressBar.setVisibility(View.VISIBLE);
+        }
+        updateUrlInput(url);
+    }
+
+    void onPageFinished(String url) {
+        updateLegacyYoukiaRedirectPrompt(url);
+        updateUrlInput(url);
+        if (progressBar != null && progressBar.getProgress() >= 100) {
+            progressBar.setVisibility(View.GONE);
+        }
+    }
+
+    void onProgressChanged(String url, int newProgress) {
+        if (progressBar != null) {
+            progressBar.setProgress(newProgress);
+            progressBar.setVisibility(newProgress >= 100 ? View.GONE : View.VISIBLE);
+        }
+        if (newProgress >= 100) {
+            updateUrlInput(url);
+        }
+    }
+
+    void performPendingLegacyYoukiaRedirect() {
+        String sourceUrl = pendingLegacyYoukiaSourceUrl;
+        String targetUrl = pendingLegacyYoukiaTargetUrl;
+        hideLegacyYoukiaRedirectPrompt();
+        if (TextUtils.isEmpty(sourceUrl) || TextUtils.isEmpty(targetUrl)) {
+            return;
+        }
+        copyCookiesForRedirect(sourceUrl, targetUrl);
+        loadUrl(targetUrl);
+    }
+
+    String normalizeInputToUrl(String rawInput) {
+        if (Patterns.WEB_URL.matcher(rawInput).matches()) {
+            return ensureScheme(rawInput);
+        }
+
+        Uri parsed = Uri.parse(rawInput);
+        if (parsed.getScheme() != null) {
+            return rawInput;
+        }
+
+        if (rawInput.contains(".") && !rawInput.contains(" ")) {
+            return "https://" + rawInput;
+        }
+
+        return "https://www.google.com/search?q=" + Uri.encode(rawInput);
+    }
+
+    void updateUrlInput(String url) {
+        if (TextUtils.isEmpty(url) || urlInput.hasFocus()) {
+            return;
+        }
+        urlInput.setText(url);
+        urlInput.setSelection(urlInput.getText().length());
+    }
+
+    void setUrlInputText(String value) {
+        if (value == null) {
+            value = "";
+        }
+        urlInput.setText(value);
+        urlInput.setSelection(urlInput.getText().length());
+    }
+
+    void hideKeyboard() {
+        InputMethodManager imm = (InputMethodManager) activity.getSystemService(AppCompatActivity.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.hideSoftInputFromWindow(urlInput.getWindowToken(), 0);
+        }
+    }
+
+    void focusWebView() {
+        webView.requestFocus();
+    }
+
+    private void copyCookiesForRedirect(String sourceUrl, String targetUrl) {
+        if (TextUtils.isEmpty(sourceUrl) || TextUtils.isEmpty(targetUrl)) {
+            return;
+        }
+
+        try {
+            CookieManager cookieManager = CookieManager.getInstance();
+            String cookies = cookieManager.getCookie(sourceUrl);
+            if (TextUtils.isEmpty(cookies)) {
+                return;
+            }
+            cookieManager.setCookie(targetUrl, cookies);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                cookieManager.flush();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to copy cookies during redirect: " + sourceUrl + " -> " + targetUrl, e);
+        }
+    }
+
+    private void updateLegacyYoukiaRedirectPrompt(String currentUrl) {
+        String targetUrl = resolveSpecialYoukiaRedirectTarget(currentUrl);
+        if (TextUtils.isEmpty(targetUrl) || TextUtils.equals(currentUrl, targetUrl)) {
+            hideLegacyYoukiaRedirectPrompt();
+            return;
+        }
+
+        pendingLegacyYoukiaSourceUrl = currentUrl;
+        pendingLegacyYoukiaTargetUrl = targetUrl;
+        if (legacyYoukiaRedirectButton != null) {
+            legacyYoukiaRedirectButton.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void hideLegacyYoukiaRedirectPrompt() {
+        pendingLegacyYoukiaSourceUrl = null;
+        pendingLegacyYoukiaTargetUrl = null;
+        if (legacyYoukiaRedirectButton != null) {
+            legacyYoukiaRedirectButton.setVisibility(View.GONE);
+        }
+    }
+
+    private String resolveSpecialYoukiaRedirectTarget(String rawUrl) {
+        if (TextUtils.isEmpty(rawUrl)) {
+            return null;
+        }
+
+        try {
+            Uri uri = Uri.parse(rawUrl);
+            if (!CookieProfileManager.isLegacyYoukiaLandingPage(uri)) {
+                return null;
+            }
+
+            String subdomain = CookieProfileManager.extractLegacyYoukiaSubdomain(uri);
+            if (TextUtils.isEmpty(subdomain)) {
+                return null;
+            }
+
+            return "http://" + subdomain + ".youkia.pvz.youkia.com/pvz/index.php/default/main";
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to rewrite youkia url: " + rawUrl, e);
+            return null;
+        }
+    }
+
+    private String ensureScheme(String value) {
+        Uri uri = Uri.parse(value);
+        if (uri.getScheme() != null) {
+            return value;
+        }
+        return "https://" + value;
+    }
 }
 
 final class FeaturePanelDialogController {
