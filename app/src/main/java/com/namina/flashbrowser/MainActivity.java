@@ -81,7 +81,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class MainActivity extends AppCompatActivity {
-    private static final String TAG = "RuffleWrapper";
+    private static final String TAG = "FlashBrowser";
     private static final String DEFAULT_URL = "https://webbrowsertools.com/test-flash-player/";
     private static final String IE_USER_AGENT =
             "Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; Trident/6.0)";

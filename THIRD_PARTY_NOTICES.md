@@ -1,6 +1,6 @@
 Third-party notices
 
-AMF codec implementation in `app/src/main/java/com/oxgames/rufflewrapper/amf/` is adapted from ideas and wire-format handling found in:
+AMF codec implementation in `app/src/main/java/com/namina/flashbrowser/amf/` is adapted from ideas and wire-format handling found in:
 
 - GraniteDS
 - OpenAMF
