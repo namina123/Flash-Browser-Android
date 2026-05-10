@@ -10,7 +10,6 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
@@ -85,16 +84,6 @@ import org.json.JSONObject;
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "RuffleWrapper";
     private static final String DEFAULT_URL = "https://webbrowsertools.com/test-flash-player/";
-    private static final String PREFS_NAME = "browser_prefs";
-    private static final String PREF_ORIENTATION = "orientation_mode";
-    private static final String PREF_RUFFLE_FONT_MODE = "ruffle_font_mode";
-    private static final String PREF_PANEL_CONCURRENCY = "panel_concurrency";
-    private static final String PREF_PANEL_REQUEST_INTERVAL = "panel_request_interval";
-    private static final String PREF_PANEL_FREQUENT_RETRY_INTERVAL = "panel_frequent_retry_interval";
-    private static final String PREF_PANEL_SELECTED_COOKIE_KEYS = "panel_selected_cookie_keys";
-    private static final String PREF_PANEL_SELECT_CURRENT_PAGE_COOKIE = "panel_select_current_page_cookie";
-    private static final String PREF_PANEL_TASK_DAILY_DUTY = "panel_task_daily_duty";
-    private static final String PREF_PANEL_REPOSITORY_RECORDS = "panel_repository_records";
     private static final String IE_USER_AGENT =
             "Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; Trident/6.0)";
     private static final String IE_ACCEPT =
@@ -213,7 +202,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean hoverEnteredByHold;
     private boolean flashTouchBridgeAvailable;
     private boolean syntheticMouseHoverActive;
-    private SharedPreferences preferences;
+    private BrowserPreferenceStore preferenceStore;
     private LocalMappingManager localMappingManager;
     private CookieProfileManager cookieProfileManager;
     private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
@@ -284,7 +273,7 @@ public class MainActivity extends AppCompatActivity {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED);
-        preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        preferenceStore = new BrowserPreferenceStore(this);
         applySavedOrientation();
         setContentView(R.layout.activity_main);
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
@@ -1923,9 +1912,9 @@ public class MainActivity extends AppCompatActivity {
         featurePanelConcurrencyInput.setText(String.valueOf(getSavedPanelConcurrency()));
         featurePanelRequestIntervalInput.setText(String.valueOf(getSavedPanelRequestInterval()));
         featurePanelFrequentRetryIntervalInput.setText(String.valueOf(getSavedPanelFrequentRetryInterval()));
-        featurePanelDailyDutyCheckBox.setChecked(preferences.getBoolean(PREF_PANEL_TASK_DAILY_DUTY, false));
+        featurePanelDailyDutyCheckBox.setChecked(preferenceStore.isPanelDailyDutyEnabled());
         featurePanelDailyDutyCheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
-                preferences.edit().putBoolean(PREF_PANEL_TASK_DAILY_DUTY, isChecked).apply());
+                preferenceStore.setPanelDailyDutyEnabled(isChecked));
         featurePanelTabCookieButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_COOKIE));
         featurePanelTabBasicButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_BASIC));
         featurePanelTabRepositoryButton.setOnClickListener(v -> switchFeaturePanelTab(FEATURE_PANEL_TAB_REPOSITORY));
@@ -2796,7 +2785,7 @@ public class MainActivity extends AppCompatActivity {
 
     private WarehouseRecordManager.RepositorySnapshot loadRepositoryRecordedSnapshot(String key) {
         try {
-            JSONObject root = new JSONObject(preferences.getString(PREF_PANEL_REPOSITORY_RECORDS, "{}"));
+            JSONObject root = new JSONObject(preferenceStore.getRepositoryRecordsJson());
             JSONObject item = root.optJSONObject(key);
             if (item == null) {
                 return null;
@@ -2830,7 +2819,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         try {
-            JSONObject root = new JSONObject(preferences.getString(PREF_PANEL_REPOSITORY_RECORDS, "{}"));
+            JSONObject root = new JSONObject(preferenceStore.getRepositoryRecordsJson());
             JSONObject item = root.optJSONObject(key);
             if (item == null) {
                 item = new JSONObject();
@@ -2844,7 +2833,7 @@ public class MainActivity extends AppCompatActivity {
             if (!item.has("ignored")) {
                 item.put("ignored", new JSONArray());
             }
-            preferences.edit().putString(PREF_PANEL_REPOSITORY_RECORDS, root.toString()).apply();
+            preferenceStore.setRepositoryRecordsJson(root.toString());
         } catch (Exception ignored) {
         }
     }
@@ -2852,7 +2841,7 @@ public class MainActivity extends AppCompatActivity {
     private java.util.LinkedHashSet<Integer> loadRepositoryIgnoredIds(String key) {
         java.util.LinkedHashSet<Integer> result = new java.util.LinkedHashSet<>();
         try {
-            JSONObject root = new JSONObject(preferences.getString(PREF_PANEL_REPOSITORY_RECORDS, "{}"));
+            JSONObject root = new JSONObject(preferenceStore.getRepositoryRecordsJson());
             JSONObject item = root.optJSONObject(key);
             if (item == null) {
                 return result;
@@ -2871,7 +2860,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void saveRepositoryIgnoredIds(String key, java.util.LinkedHashSet<Integer> ignoredIds) {
         try {
-            JSONObject root = new JSONObject(preferences.getString(PREF_PANEL_REPOSITORY_RECORDS, "{}"));
+            JSONObject root = new JSONObject(preferenceStore.getRepositoryRecordsJson());
             JSONObject item = root.optJSONObject(key);
             if (item == null) {
                 item = new JSONObject();
@@ -2885,7 +2874,7 @@ public class MainActivity extends AppCompatActivity {
             if (!item.has("snapshot")) {
                 item.put("snapshot", new JSONObject());
             }
-            preferences.edit().putString(PREF_PANEL_REPOSITORY_RECORDS, root.toString()).apply();
+            preferenceStore.setRepositoryRecordsJson(root.toString());
         } catch (Exception ignored) {
         }
     }
@@ -2912,32 +2901,32 @@ public class MainActivity extends AppCompatActivity {
         choice.baseUrl = baseUrl;
         choice.cookies = cookies;
         choice.currentPage = true;
-        choice.selected = preferences.getBoolean(PREF_PANEL_SELECT_CURRENT_PAGE_COOKIE, true);
+        choice.selected = preferenceStore.isCurrentPageCookieSelectedByDefault();
         return choice;
     }
 
     private int getSavedPanelConcurrency() {
-        return Math.max(1, preferences.getInt(PREF_PANEL_CONCURRENCY, 1));
+        return preferenceStore.getPanelConcurrency(1);
     }
 
     private void savePanelConcurrency(int concurrency) {
-        preferences.edit().putInt(PREF_PANEL_CONCURRENCY, Math.max(1, concurrency)).apply();
+        preferenceStore.setPanelConcurrency(concurrency);
     }
 
     private int getSavedPanelRequestInterval() {
-        return Math.max(0, preferences.getInt(PREF_PANEL_REQUEST_INTERVAL, 700));
+        return preferenceStore.getPanelRequestInterval(700);
     }
 
     private void savePanelRequestInterval(int intervalMs) {
-        preferences.edit().putInt(PREF_PANEL_REQUEST_INTERVAL, Math.max(0, intervalMs)).apply();
+        preferenceStore.setPanelRequestInterval(intervalMs);
     }
 
     private int getSavedPanelFrequentRetryInterval() {
-        return Math.max(0, preferences.getInt(PREF_PANEL_FREQUENT_RETRY_INTERVAL, 14000));
+        return preferenceStore.getPanelFrequentRetryInterval(14000);
     }
 
     private void savePanelFrequentRetryInterval(int intervalMs) {
-        preferences.edit().putInt(PREF_PANEL_FREQUENT_RETRY_INTERVAL, Math.max(0, intervalMs)).apply();
+        preferenceStore.setPanelFrequentRetryInterval(intervalMs);
     }
 
     private void switchFeaturePanelTab(int tab) {
@@ -2974,7 +2963,7 @@ public class MainActivity extends AppCompatActivity {
         if (TextUtils.isEmpty(selectionKey)) {
             return false;
         }
-        Set<String> selectedKeys = preferences.getStringSet(PREF_PANEL_SELECTED_COOKIE_KEYS, new HashSet<>());
+        Set<String> selectedKeys = preferenceStore.getSelectedCookieKeys();
         return selectedKeys.contains(selectionKey);
     }
 
@@ -2983,19 +2972,19 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         if (choice.currentPage) {
-            preferences.edit().putBoolean(PREF_PANEL_SELECT_CURRENT_PAGE_COOKIE, selected).apply();
+            preferenceStore.setCurrentPageCookieSelectedByDefault(selected);
             return;
         }
         if (TextUtils.isEmpty(choice.selectionKey)) {
             return;
         }
-        Set<String> selectedKeys = new HashSet<>(preferences.getStringSet(PREF_PANEL_SELECTED_COOKIE_KEYS, new HashSet<>()));
+        Set<String> selectedKeys = new HashSet<>(preferenceStore.getSelectedCookieKeys());
         if (selected) {
             selectedKeys.add(choice.selectionKey);
         } else {
             selectedKeys.remove(choice.selectionKey);
         }
-        preferences.edit().putStringSet(PREF_PANEL_SELECTED_COOKIE_KEYS, selectedKeys).apply();
+        preferenceStore.setSelectedCookieKeys(selectedKeys);
     }
 
     private void startDailyDutyRequestsFromPanel(boolean startCheckedItemsOnly) {
@@ -3160,20 +3149,20 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applySavedOrientation() {
-        int mode = preferences.getInt(PREF_ORIENTATION, ORIENTATION_PORTRAIT);
+        int mode = preferenceStore.getOrientationMode(ORIENTATION_PORTRAIT);
         applyOrientation(mode);
     }
 
     private void saveOrientation(int mode) {
-        preferences.edit().putInt(PREF_ORIENTATION, mode).apply();
+        preferenceStore.setOrientationMode(mode);
     }
 
     private int getSavedFontMode() {
-        return preferences.getInt(PREF_RUFFLE_FONT_MODE, FONT_MODE_CHINESE_SANS);
+        return preferenceStore.getFontMode(FONT_MODE_CHINESE_SANS);
     }
 
     private void saveFontMode(int mode) {
-        preferences.edit().putInt(PREF_RUFFLE_FONT_MODE, mode).apply();
+        preferenceStore.setFontMode(mode);
     }
 
     private String buildFontMenuTitle(int currentMode, int itemMode, String label) {
