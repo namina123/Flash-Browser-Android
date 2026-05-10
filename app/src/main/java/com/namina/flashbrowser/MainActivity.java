@@ -1276,12 +1276,6 @@ final class FeaturePanelDialogController {
         repositoryCompareButton.setOnClickListener(
                 v -> repositoryController.compareSelectedTargets(featureCookieChoices)
         );
-        repositoryIgnoreSelectedButton.setOnClickListener(
-                v -> repositoryController.addSelectedDeltasToIgnored(featureCookieChoices)
-        );
-        repositoryRemoveIgnoredButton.setOnClickListener(
-                v -> repositoryController.removeSelectedIgnoredItems(featureCookieChoices)
-        );
         pauseResumeButton.setOnClickListener(v -> {
             DutyRequestQueue.StateSnapshot snapshot = dutyRequestQueue.snapshot();
             if (snapshot.running && !snapshot.paused) {
@@ -2933,6 +2927,7 @@ final class FeaturePanelRepositoryController {
     private String sessionViewChoiceKey;
     private boolean sessionRecordSelectionInitialized;
     private boolean currentExpanded;
+    private boolean deltaExpanded;
 
     FeaturePanelRepositoryController(
             AppCompatActivity activity,
@@ -2972,6 +2967,7 @@ final class FeaturePanelRepositoryController {
         this.repositoryCurrentContainer = repositoryCurrentContainer;
         this.repositoryDeltaContainer = repositoryDeltaContainer;
         this.repositoryIgnoredContainer = repositoryIgnoredContainer;
+        hideUnusedRepositoryViews();
     }
 
     void clear() {
@@ -2982,8 +2978,7 @@ final class FeaturePanelRepositoryController {
         if (repositorySelectedTargetsText == null
                 || repositoryViewCookieText == null
                 || repositoryCurrentContainer == null
-                || repositoryDeltaContainer == null
-                || repositoryIgnoredContainer == null) {
+                || repositoryDeltaContainer == null) {
             return;
         }
 
@@ -2991,6 +2986,7 @@ final class FeaturePanelRepositoryController {
         List<FeatureCookieChoice> selectedChoices = getSelectedChoices(choices);
         if (selectedChoices.isEmpty()) {
             currentExpanded = false;
+            deltaExpanded = false;
             repositorySelectedTargetsText.setText("当前未选择记录目标");
             repositoryViewCookieText.setText("当前未选择查看目标");
             if (repositoryHintText != null) {
@@ -2998,7 +2994,6 @@ final class FeaturePanelRepositoryController {
             }
             renderMessage(repositoryCurrentContainer, "当前未选择记录目标");
             renderMessage(repositoryDeltaContainer, "当前未选择记录目标");
-            renderMessage(repositoryIgnoredContainer, "当前未选择记录目标");
             updateButtonsEnabled(false);
             return;
         }
@@ -3050,6 +3045,7 @@ final class FeaturePanelRepositoryController {
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {
                     refreshSelectionState(choices);
                     currentExpanded = false;
+                    deltaExpanded = false;
                     render(choices);
                 })
                 .setNegativeButton(android.R.string.cancel, null)
@@ -3080,6 +3076,7 @@ final class FeaturePanelRepositoryController {
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {
                     sessionViewChoiceKey = getChoiceKey(selectedChoices.get(selectedIndex[0]));
                     currentExpanded = false;
+                    deltaExpanded = false;
                     render(choices);
                 })
                 .setNegativeButton(android.R.string.cancel, null)
@@ -3249,13 +3246,11 @@ final class FeaturePanelRepositoryController {
         }
 
         WarehouseRecordManager.RepositorySnapshot recordedSnapshot = loadRecordedSnapshot(key);
-        LinkedHashSet<Integer> ignoredIds = loadIgnoredIds(key);
         if (recordedSnapshot == null || currentSnapshot == null) {
             renderMessage(repositoryDeltaContainer, "请先刷新仓库并至少记录一次。");
         } else {
-            renderDeltas(key, warehouseRecordManager.compare(currentSnapshot, recordedSnapshot, ignoredIds));
+            renderDeltas(warehouseRecordManager.compare(currentSnapshot, recordedSnapshot, null));
         }
-        renderIgnoredList(key, ignoredIds);
     }
 
     private void renderCurrentSnapshot(WarehouseRecordManager.RepositorySnapshot snapshot) {
@@ -3300,6 +3295,57 @@ final class FeaturePanelRepositoryController {
                 builder.append('\n');
             }
             builder.append(entry.displayName).append(" x ").append(entry.amount);
+        }
+        return builder.toString();
+    }
+
+    private void renderDeltas(List<WarehouseRecordManager.RepositoryDelta> deltas) {
+        repositoryDeltaContainer.removeAllViews();
+        if (deltas == null || deltas.isEmpty()) {
+            renderMessage(repositoryDeltaContainer, "暂无变化。");
+            return;
+        }
+
+        final int collapsedLineCount = 8;
+        String fullText = buildDeltaText(deltas);
+        String[] lines = fullText.split("\n");
+        boolean canCollapse = lines.length > collapsedLineCount;
+        String shownText = fullText;
+        if (!deltaExpanded && canCollapse) {
+            shownText = TextUtils.join("\n", Arrays.asList(lines).subList(0, collapsedLineCount));
+        }
+
+        TextView textView = new TextView(activity);
+        textView.setText(shownText);
+        textView.setTextColor(0xFF1F2937);
+        textView.setBackgroundColor(0xFFFFFFFF);
+        textView.setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12));
+        repositoryDeltaContainer.addView(textView);
+
+        if (canCollapse) {
+            Button toggleButton = new Button(activity);
+            toggleButton.setAllCaps(false);
+            toggleButton.setText(deltaExpanded ? "收起" : "展开全部");
+            toggleButton.setOnClickListener(v -> {
+                deltaExpanded = !deltaExpanded;
+                renderDeltas(deltas);
+            });
+            repositoryDeltaContainer.addView(toggleButton);
+        }
+    }
+
+    private String buildDeltaText(List<WarehouseRecordManager.RepositoryDelta> deltas) {
+        StringBuilder builder = new StringBuilder();
+        for (WarehouseRecordManager.RepositoryDelta delta : deltas) {
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(delta.displayName)
+                    .append(" | ")
+                    .append(delta.deltaAmount >= 0 ? "+" : "")
+                    .append(delta.deltaAmount)
+                    .append(" | 当前 ")
+                    .append(delta.currentAmount);
         }
         return builder.toString();
     }
@@ -3525,6 +3571,37 @@ final class FeaturePanelRepositoryController {
             }
             preferenceStore.setRepositoryRecordsJson(root.toString());
         } catch (Exception ignored) {
+        }
+    }
+
+    private void hideUnusedRepositoryViews() {
+        hideView(repositoryIgnoreSelectedButton);
+        hideView(repositoryRemoveIgnoredButton);
+        hideView(repositoryIgnoredContainer);
+        hidePreviousLabel(repositoryRemoveIgnoredButton);
+    }
+
+    private void hidePreviousLabel(View view) {
+        if (view == null) {
+            return;
+        }
+        android.view.ViewParent parent = view.getParent();
+        if (!(parent instanceof LinearLayout)) {
+            return;
+        }
+        LinearLayout layout = (LinearLayout) parent;
+        int index = layout.indexOfChild(view);
+        if (index > 0) {
+            View previous = layout.getChildAt(index - 1);
+            if (previous instanceof TextView) {
+                previous.setVisibility(View.GONE);
+            }
+        }
+    }
+
+    private void hideView(View view) {
+        if (view != null) {
+            view.setVisibility(View.GONE);
         }
     }
 
