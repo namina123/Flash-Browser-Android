@@ -118,26 +118,12 @@ public class MainActivity extends AppCompatActivity {
     private ImageButton fullscreenExitButton;
     private ImageButton fullscreenFeaturePanelButton;
     private Button legacyYoukiaRedirectButton;
-    private View customView;
-    private WebChromeClient.CustomViewCallback customViewCallback;
-    private boolean inAppRuffleFullscreen;
-    private int topBarBasePaddingLeft;
-    private int topBarBasePaddingTop;
-    private int topBarBasePaddingRight;
-    private int topBarBasePaddingBottom;
-    private int browserChromeBasePaddingLeft;
-    private int browserChromeBasePaddingTop;
-    private int browserChromeBasePaddingRight;
-    private int browserChromeBasePaddingBottom;
-    private int fullscreenRotateBaseTopMargin;
-    private int fullscreenRotateBaseRightMargin;
-    private int fullscreenExitBaseTopMargin;
-    private int fullscreenExitBaseRightMargin;
     private BrowserPreferenceStore preferenceStore;
     private LocalMappingManager localMappingManager;
     private CookieProfileManager cookieProfileManager;
     private BrowserSettingsController browserSettingsController;
     private BrowserRequestController browserRequestController;
+    private BrowserFullscreenController browserFullscreenController;
     private BrowserTouchController browserTouchController;
     private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
     private final FeaturePanelUiController featurePanelUiController = new FeaturePanelUiController();
@@ -276,8 +262,19 @@ public class MainActivity extends AppCompatActivity {
         fullscreenExitButton = findViewById(R.id.btn_exit_fullscreen);
         fullscreenFeaturePanelButton = findViewById(R.id.btn_feature_panel_fullscreen);
         legacyYoukiaRedirectButton = findViewById(R.id.btn_legacy_youkia_redirect);
-        captureInsetAwareBaseValues();
-        installWindowInsetHandlers();
+        browserFullscreenController = new BrowserFullscreenController(
+                this,
+                wrapper,
+                progressBar,
+                topBar,
+                browserChrome,
+                fullscreenContainer,
+                fullscreenRotateButton,
+                fullscreenExitButton,
+                fullscreenFeaturePanelButton,
+                this::applySavedOrientation
+        );
+        browserFullscreenController.initializeWindowInsets();
         browserTouchController = new BrowserTouchController(this, wrapper);
 
         findViewById(R.id.btn_back).setOnClickListener(v -> {
@@ -294,18 +291,12 @@ public class MainActivity extends AppCompatActivity {
 
         findViewById(R.id.btn_refresh).setOnClickListener(v -> wrapper.reload());
         findViewById(R.id.btn_go).setOnClickListener(v -> showFeaturePanelDialog());
-        findViewById(R.id.btn_fullscreen).setOnClickListener(v -> toggleRuffleFullscreenCompat());
+        findViewById(R.id.btn_fullscreen).setOnClickListener(v -> browserFullscreenController.toggleRuffleFullscreenCompat());
         findViewById(R.id.btn_save_cookie).setOnClickListener(v -> browserSettingsController.saveCurrentCookieProfile());
         fullscreenFeaturePanelButton.setOnClickListener(v -> toggleFeaturePanelDialog());
         legacyYoukiaRedirectButton.setOnClickListener(v -> performPendingLegacyYoukiaRedirect());
-        fullscreenRotateButton.setOnClickListener(v -> rotateFullscreenOrientation());
-        fullscreenExitButton.setOnClickListener(v -> {
-            if (customView != null) {
-                hideFullscreenContent();
-            } else if (inAppRuffleFullscreen) {
-                toggleRuffleFullscreenCompat();
-            }
-        });
+        fullscreenRotateButton.setOnClickListener(v -> browserFullscreenController.rotateFullscreenOrientation());
+        fullscreenExitButton.setOnClickListener(v -> browserFullscreenController.handleExitButtonClick());
         findViewById(R.id.btn_settings).setOnClickListener(browserSettingsController::showSettingsMenu);
 
         urlInput.setOnEditorActionListener((v, actionId, event) -> {
@@ -337,99 +328,6 @@ public class MainActivity extends AppCompatActivity {
             refreshFeaturePanelCookieChoices();
             featurePanelRepositoryController.render(featureCookieChoices);
             renderFeaturePanelQueueState(dutyRequestQueue.snapshot());
-        }
-    }
-
-    private void captureInsetAwareBaseValues() {
-        if (topBar != null) {
-            topBarBasePaddingLeft = topBar.getPaddingLeft();
-            topBarBasePaddingTop = topBar.getPaddingTop();
-            topBarBasePaddingRight = topBar.getPaddingRight();
-            topBarBasePaddingBottom = topBar.getPaddingBottom();
-        }
-        if (browserChrome != null) {
-            browserChromeBasePaddingLeft = browserChrome.getPaddingLeft();
-            browserChromeBasePaddingTop = browserChrome.getPaddingTop();
-            browserChromeBasePaddingRight = browserChrome.getPaddingRight();
-            browserChromeBasePaddingBottom = browserChrome.getPaddingBottom();
-        }
-        if (fullscreenRotateButton != null) {
-            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenRotateButton.getLayoutParams();
-            fullscreenRotateBaseTopMargin = params.topMargin;
-            fullscreenRotateBaseRightMargin = params.rightMargin;
-        }
-        if (fullscreenExitButton != null) {
-            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenExitButton.getLayoutParams();
-            fullscreenExitBaseTopMargin = params.topMargin;
-            fullscreenExitBaseRightMargin = params.rightMargin;
-        }
-    }
-
-    private void installWindowInsetHandlers() {
-        View root = findViewById(android.R.id.content);
-        if (root == null) {
-            return;
-        }
-        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            boolean fullscreenActive = customView != null || inAppRuffleFullscreen;
-
-            if (browserChrome != null) {
-                int left = fullscreenActive ? 0 : browserChromeBasePaddingLeft + systemBars.left;
-                int top = fullscreenActive ? 0 : browserChromeBasePaddingTop;
-                int right = fullscreenActive ? 0 : browserChromeBasePaddingRight + systemBars.right;
-                int bottom = fullscreenActive ? 0 : browserChromeBasePaddingBottom + systemBars.bottom;
-                browserChrome.setPadding(left, top, right, bottom);
-            }
-            if (topBar != null) {
-                topBar.setPadding(
-                        topBarBasePaddingLeft + systemBars.left,
-                        topBarBasePaddingTop + systemBars.top,
-                        topBarBasePaddingRight + systemBars.right,
-                        topBarBasePaddingBottom
-                );
-            }
-            applyFullscreenButtonInsets(systemBars);
-            return insets;
-        });
-        ViewCompat.requestApplyInsets(root);
-    }
-
-    private void applyFullscreenButtonInsets(Insets systemBars) {
-        if (fullscreenRotateButton != null) {
-            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenRotateButton.getLayoutParams();
-            params.topMargin = fullscreenRotateBaseTopMargin + systemBars.top;
-            params.rightMargin = fullscreenRotateBaseRightMargin + systemBars.right;
-            fullscreenRotateButton.setLayoutParams(params);
-        }
-        if (fullscreenExitButton != null) {
-            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenExitButton.getLayoutParams();
-            params.topMargin = fullscreenExitBaseTopMargin + systemBars.top;
-            params.rightMargin = fullscreenExitBaseRightMargin + systemBars.right;
-            fullscreenExitButton.setLayoutParams(params);
-        }
-    }
-
-    private void requestInsetRefresh() {
-        View root = findViewById(android.R.id.content);
-        if (root != null) {
-            ViewCompat.requestApplyInsets(root);
-        }
-    }
-
-    private void setSystemBarsHidden(boolean hidden) {
-        WindowInsetsControllerCompat controller =
-                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-        if (controller == null) {
-            return;
-        }
-        if (hidden) {
-            controller.setSystemBarsBehavior(
-                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            );
-            controller.hide(WindowInsetsCompat.Type.systemBars());
-        } else {
-            controller.show(WindowInsetsCompat.Type.systemBars());
         }
     }
 
@@ -487,7 +385,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
-                resetFullscreenStateForNavigation();
+                browserFullscreenController.resetForNavigation();
                 hideLegacyYoukiaRedirectPrompt();
                 browserTouchController.resetBridgeAvailability();
                 progressBar.setVisibility(View.VISIBLE);
@@ -497,7 +395,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                ensureFullscreenStateMatchesPage();
+                browserFullscreenController.ensureStateMatchesPage();
                 browserTouchController.refreshBridgeAvailability();
                 wrapper.postDelayed(browserTouchController::refreshBridgeAvailability, 600L);
                 updateLegacyYoukiaRedirectPrompt(url);
@@ -550,12 +448,12 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onShowCustomView(View view, CustomViewCallback callback) {
-                showFullscreenContent(view, callback);
+                browserFullscreenController.showCustomView(view, callback);
             }
 
             @Override
             public void onHideCustomView() {
-                hideFullscreenContent();
+                browserFullscreenController.hideCustomView();
             }
 
             @Override
@@ -1041,193 +939,6 @@ public class MainActivity extends AppCompatActivity {
         urlInput.setSelection(urlInput.getText().length());
     }
 
-    private void toggleRuffleFullscreen() {
-        if (customView != null) {
-            hideFullscreenContent();
-            return;
-        }
-
-        String script =
-                "(function(){" +
-                        "var exit=document.exitFullscreen||document.webkitExitFullscreen;" +
-                        "if(document.fullscreenElement){" +
-                        "if(exit){exit.call(document);return 'exit';}" +
-                        "return 'no-exit-api';" +
-                        "}" +
-                        "var target=document.querySelector('ruffle-player, ruffle-embed, ruffle-object');" +
-                        "if(!target){" +
-                        "target=document.querySelector('embed[type*=shockwave], object[type*=shockwave], embed[src*=\".swf\"], object[data*=\".swf\"]');" +
-                        "}" +
-                        "if(!target){return 'not-found';}" +
-                        "var enter=target.requestFullscreen||target.webkitRequestFullscreen;" +
-                        "if(!enter){return 'no-enter-api';}" +
-                        "enter.call(target);" +
-                        "return 'enter';" +
-                        "})();";
-
-        wrapper.evaluateJavascript(script, value -> {
-            if (value == null) {
-                Toast.makeText(this, "无法切换 Ruffle 全屏", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            String normalized = value.replace("\"", "");
-            if ("not-found".equals(normalized)) {
-                Toast.makeText(this, "当前页面未找到 Ruffle 播放器", Toast.LENGTH_SHORT).show();
-            } else if ("no-enter-api".equals(normalized)) {
-                Toast.makeText(this, "当前页面不支持全屏接口", Toast.LENGTH_SHORT).show();
-            } else if ("no-exit-api".equals(normalized)) {
-                Toast.makeText(this, "当前页面无法退出全屏", Toast.LENGTH_SHORT).show();
-            }
-        });
-    }
-
-    private void toggleRuffleFullscreenCompat() {
-        if (customView != null) {
-            hideFullscreenContent();
-            return;
-        }
-
-        String script =
-                "(function(){" +
-                        "window.__androidRuffleFullscreen=window.__androidRuffleFullscreen||{};" +
-                        "var state=window.__androidRuffleFullscreen;" +
-                        "if(state.active&&state.target){" +
-                        "if(state.originalStyle===null){state.target.removeAttribute('style');}" +
-                        "else{state.target.setAttribute('style',state.originalStyle);}" +
-                        "document.documentElement.style.overflow=state.htmlOverflow||'';" +
-                        "if(document.body){document.body.style.overflow=state.bodyOverflow||'';}" +
-                        "state.active=false;" +
-                        "state.target=null;" +
-                        "state.originalStyle=null;" +
-                        "return 'exit';" +
-                        "}" +
-                        "var target=document.querySelector('ruffle-player, ruffle-embed, ruffle-object');" +
-                        "if(!target){" +
-                        "target=document.querySelector('embed[type*=shockwave], object[type*=shockwave], embed[src*=\\\".swf\\\"], object[data*=\\\".swf\\\"]');" +
-                        "}" +
-                        "if(!target){return 'not-found';}" +
-                        "state.target=target;" +
-                        "state.originalStyle=target.getAttribute('style');" +
-                        "state.htmlOverflow=document.documentElement.style.overflow||'';" +
-                        "state.bodyOverflow=document.body?document.body.style.overflow||'':'';" +
-                        "document.documentElement.style.overflow='hidden';" +
-                        "if(document.body){document.body.style.overflow='hidden';}" +
-                        "target.style.position='fixed';" +
-                        "target.style.left='0';" +
-                        "target.style.top='0';" +
-                        "target.style.width='100vw';" +
-                        "target.style.height='100vh';" +
-                        "target.style.maxWidth='100vw';" +
-                        "target.style.maxHeight='100vh';" +
-                        "target.style.margin='0';" +
-                        "target.style.padding='0';" +
-                        "target.style.zIndex='2147483647';" +
-                        "target.style.background='#000';" +
-                        "state.active=true;" +
-                        "return 'enter';" +
-                        "})();";
-
-        wrapper.evaluateJavascript(script, value -> {
-            if (value == null) {
-                Toast.makeText(this, "Unable to toggle Ruffle fullscreen", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            String normalized = value.replace("\"", "");
-            if ("enter".equals(normalized)) {
-                enterInAppRuffleFullscreenMode();
-            } else if ("exit".equals(normalized)) {
-                exitInAppRuffleFullscreenMode();
-            } else if ("not-found".equals(normalized)) {
-                Toast.makeText(this, "Current page has no Ruffle player", Toast.LENGTH_SHORT).show();
-            }
-        });
-    }
-
-    private void enterInAppRuffleFullscreenMode() {
-        if (inAppRuffleFullscreen) {
-            return;
-        }
-
-        inAppRuffleFullscreen = true;
-
-        if (topBar != null) {
-            topBar.setVisibility(View.GONE);
-        }
-        if (progressBar != null) {
-            progressBar.setVisibility(View.GONE);
-        }
-        if (fullscreenRotateButton != null) {
-            fullscreenRotateButton.setVisibility(View.VISIBLE);
-        }
-        if (fullscreenExitButton != null) {
-            fullscreenExitButton.setVisibility(View.VISIBLE);
-        }
-        if (fullscreenFeaturePanelButton != null) {
-            fullscreenFeaturePanelButton.setVisibility(View.VISIBLE);
-        }
-
-        setSystemBarsHidden(true);
-        requestInsetRefresh();
-    }
-
-    private void exitInAppRuffleFullscreenMode() {
-        if (!inAppRuffleFullscreen) {
-            return;
-        }
-
-        inAppRuffleFullscreen = false;
-
-        if (topBar != null) {
-            topBar.setVisibility(View.VISIBLE);
-        }
-        if (progressBar != null) {
-            progressBar.setVisibility(progressBar.getProgress() >= 100 ? View.GONE : View.VISIBLE);
-        }
-        if (fullscreenRotateButton != null) {
-            fullscreenRotateButton.setVisibility(View.GONE);
-        }
-        if (fullscreenExitButton != null) {
-            fullscreenExitButton.setVisibility(View.GONE);
-        }
-        if (fullscreenFeaturePanelButton != null) {
-            fullscreenFeaturePanelButton.setVisibility(View.GONE);
-        }
-
-        setSystemBarsHidden(false);
-        applySavedOrientation();
-        requestInsetRefresh();
-    }
-
-    private void resetFullscreenStateForNavigation() {
-        if (customView != null) {
-            hideFullscreenContent();
-        }
-        if (inAppRuffleFullscreen) {
-            exitInAppRuffleFullscreenMode();
-        }
-    }
-
-    private void ensureFullscreenStateMatchesPage() {
-        if (!inAppRuffleFullscreen || wrapper == null) {
-            return;
-        }
-        String script =
-                "(function(){" +
-                        "var state=window.__androidRuffleFullscreen||null;" +
-                        "var target=document.querySelector('ruffle-player, ruffle-embed, ruffle-object');" +
-                        "if(!target){target=document.querySelector('embed[type*=shockwave], object[type*=shockwave], embed[src*=\\\".swf\\\"], object[data*=\\\".swf\\\"]');}" +
-                        "return !!(state&&state.active&&state.target&&target);" +
-                        "})();";
-        wrapper.evaluateJavascript(script, value -> {
-            boolean stillFullscreen = "true".equalsIgnoreCase(value == null ? "" : value.replace("\"", ""));
-            if (!stillFullscreen && inAppRuffleFullscreen) {
-                exitInAppRuffleFullscreenMode();
-            }
-        });
-    }
-
     private void hideKeyboard() {
         InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
         if (imm != null) {
@@ -1650,88 +1361,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void showFullscreenContent(View view, WebChromeClient.CustomViewCallback callback) {
-        if (view == null) {
-            if (callback != null) {
-                callback.onCustomViewHidden();
-            }
-            return;
-        }
-
-        if (customView != null) {
-            if (callback != null) {
-                callback.onCustomViewHidden();
-            }
-            return;
-        }
-
-        customView = view;
-        customViewCallback = callback;
-
-        browserChrome.setVisibility(View.GONE);
-        if (fullscreenRotateButton != null) {
-            fullscreenRotateButton.setVisibility(View.VISIBLE);
-        }
-        if (fullscreenExitButton != null) {
-            fullscreenExitButton.setVisibility(View.VISIBLE);
-        }
-        if (fullscreenFeaturePanelButton != null) {
-            fullscreenFeaturePanelButton.setVisibility(View.VISIBLE);
-        }
-        fullscreenContainer.setVisibility(View.VISIBLE);
-        fullscreenContainer.removeAllViews();
-        fullscreenContainer.addView(view, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        ));
-
-        setSystemBarsHidden(true);
-        requestInsetRefresh();
-    }
-
-    private void hideFullscreenContent() {
-        if (customView == null) {
-            return;
-        }
-
-        fullscreenContainer.removeView(customView);
-        fullscreenContainer.setVisibility(View.GONE);
-        browserChrome.setVisibility(View.VISIBLE);
-        if (fullscreenRotateButton != null) {
-            fullscreenRotateButton.setVisibility(View.GONE);
-        }
-        if (fullscreenExitButton != null) {
-            fullscreenExitButton.setVisibility(View.GONE);
-        }
-        if (fullscreenFeaturePanelButton != null) {
-            fullscreenFeaturePanelButton.setVisibility(View.GONE);
-        }
-
-        setSystemBarsHidden(false);
-        applySavedOrientation();
-        requestInsetRefresh();
-
-        if (customViewCallback != null) {
-            customViewCallback.onCustomViewHidden();
-        }
-
-        customView = null;
-        customViewCallback = null;
-    }
-
-    private void rotateFullscreenOrientation() {
-        if (customView == null && !inAppRuffleFullscreen) {
-            return;
-        }
-
-        int orientation = getResources().getConfiguration().orientation;
-        if (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
-        } else {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
-        }
-    }
-
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
@@ -1741,12 +1370,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleBackNavigation() {
-        if (customView != null) {
-            hideFullscreenContent();
-            return;
-        }
-        if (inAppRuffleFullscreen) {
-            toggleRuffleFullscreenCompat();
+        if (browserFullscreenController.handleBackPressed()) {
             return;
         }
         if (wrapper.canGoBack()) {
@@ -1756,6 +1380,394 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+}
+
+final class BrowserFullscreenController {
+    private final AppCompatActivity activity;
+    private final WebView webView;
+    private final ProgressBar progressBar;
+    private final View topBar;
+    private final View browserChrome;
+    private final FrameLayout fullscreenContainer;
+    private final ImageButton fullscreenRotateButton;
+    private final ImageButton fullscreenExitButton;
+    private final ImageButton fullscreenFeaturePanelButton;
+    private final Runnable restoreOrientationAction;
+    private int topBarBasePaddingLeft;
+    private int topBarBasePaddingTop;
+    private int topBarBasePaddingRight;
+    private int topBarBasePaddingBottom;
+    private int browserChromeBasePaddingLeft;
+    private int browserChromeBasePaddingTop;
+    private int browserChromeBasePaddingRight;
+    private int browserChromeBasePaddingBottom;
+    private int fullscreenRotateBaseTopMargin;
+    private int fullscreenRotateBaseRightMargin;
+    private int fullscreenExitBaseTopMargin;
+    private int fullscreenExitBaseRightMargin;
+    private View customView;
+    private WebChromeClient.CustomViewCallback customViewCallback;
+    private boolean inAppRuffleFullscreen;
+
+    BrowserFullscreenController(
+            AppCompatActivity activity,
+            WebView webView,
+            ProgressBar progressBar,
+            View topBar,
+            View browserChrome,
+            FrameLayout fullscreenContainer,
+            ImageButton fullscreenRotateButton,
+            ImageButton fullscreenExitButton,
+            ImageButton fullscreenFeaturePanelButton,
+            Runnable restoreOrientationAction
+    ) {
+        this.activity = activity;
+        this.webView = webView;
+        this.progressBar = progressBar;
+        this.topBar = topBar;
+        this.browserChrome = browserChrome;
+        this.fullscreenContainer = fullscreenContainer;
+        this.fullscreenRotateButton = fullscreenRotateButton;
+        this.fullscreenExitButton = fullscreenExitButton;
+        this.fullscreenFeaturePanelButton = fullscreenFeaturePanelButton;
+        this.restoreOrientationAction = restoreOrientationAction;
+    }
+
+    void initializeWindowInsets() {
+        captureInsetAwareBaseValues();
+        installWindowInsetHandlers();
+    }
+
+    void toggleRuffleFullscreenCompat() {
+        if (customView != null) {
+            hideCustomView();
+            return;
+        }
+
+        String script =
+                "(function(){"
+                        + "window.__androidRuffleFullscreen=window.__androidRuffleFullscreen||{};"
+                        + "var state=window.__androidRuffleFullscreen;"
+                        + "if(state.active&&state.target){"
+                        + "if(state.originalStyle===null){state.target.removeAttribute('style');}"
+                        + "else{state.target.setAttribute('style',state.originalStyle);}"
+                        + "document.documentElement.style.overflow=state.htmlOverflow||'';"
+                        + "if(document.body){document.body.style.overflow=state.bodyOverflow||'';}"
+                        + "state.active=false;"
+                        + "state.target=null;"
+                        + "state.originalStyle=null;"
+                        + "return 'exit';"
+                        + "}"
+                        + "var target=document.querySelector('ruffle-player, ruffle-embed, ruffle-object');"
+                        + "if(!target){"
+                        + "target=document.querySelector('embed[type*=\\\"shockwave\\\"], object[type*=\\\"shockwave\\\"], embed[src*=\\\".swf\\\"], object[data*=\\\".swf\\\"]');"
+                        + "}"
+                        + "if(!target){return 'not-found';}"
+                        + "state.target=target;"
+                        + "state.originalStyle=target.getAttribute('style');"
+                        + "state.htmlOverflow=document.documentElement.style.overflow||'';"
+                        + "state.bodyOverflow=document.body?document.body.style.overflow||'':'';"
+                        + "document.documentElement.style.overflow='hidden';"
+                        + "if(document.body){document.body.style.overflow='hidden';}"
+                        + "target.style.position='fixed';"
+                        + "target.style.left='0';"
+                        + "target.style.top='0';"
+                        + "target.style.width='100vw';"
+                        + "target.style.height='100vh';"
+                        + "target.style.maxWidth='100vw';"
+                        + "target.style.maxHeight='100vh';"
+                        + "target.style.margin='0';"
+                        + "target.style.padding='0';"
+                        + "target.style.zIndex='2147483647';"
+                        + "target.style.background='#000';"
+                        + "state.active=true;"
+                        + "return 'enter';"
+                        + "})();";
+
+        webView.evaluateJavascript(script, value -> {
+            if (value == null) {
+                Toast.makeText(activity, "Unable to toggle Ruffle fullscreen", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            String normalized = value.replace("\"", "");
+            if ("enter".equals(normalized)) {
+                enterInAppRuffleFullscreenMode();
+            } else if ("exit".equals(normalized)) {
+                exitInAppRuffleFullscreenMode();
+            } else if ("not-found".equals(normalized)) {
+                Toast.makeText(activity, "Current page has no Ruffle player", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    void showCustomView(View view, WebChromeClient.CustomViewCallback callback) {
+        if (view == null) {
+            if (callback != null) {
+                callback.onCustomViewHidden();
+            }
+            return;
+        }
+        if (customView != null) {
+            if (callback != null) {
+                callback.onCustomViewHidden();
+            }
+            return;
+        }
+
+        customView = view;
+        customViewCallback = callback;
+        if (browserChrome != null) {
+            browserChrome.setVisibility(View.GONE);
+        }
+        showFullscreenControls();
+        fullscreenContainer.setVisibility(View.VISIBLE);
+        fullscreenContainer.removeAllViews();
+        fullscreenContainer.addView(view, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+        setSystemBarsHidden(true);
+        requestInsetRefresh();
+    }
+
+    void hideCustomView() {
+        if (customView == null) {
+            return;
+        }
+
+        fullscreenContainer.removeView(customView);
+        fullscreenContainer.setVisibility(View.GONE);
+        if (browserChrome != null) {
+            browserChrome.setVisibility(View.VISIBLE);
+        }
+        hideFullscreenControls();
+        setSystemBarsHidden(false);
+        restoreOrientationAction.run();
+        requestInsetRefresh();
+        if (customViewCallback != null) {
+            customViewCallback.onCustomViewHidden();
+        }
+        customView = null;
+        customViewCallback = null;
+    }
+
+    void rotateFullscreenOrientation() {
+        if (customView == null && !inAppRuffleFullscreen) {
+            return;
+        }
+
+        int orientation = activity.getResources().getConfiguration().orientation;
+        if (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
+        } else {
+            activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        }
+    }
+
+    void handleExitButtonClick() {
+        if (customView != null) {
+            hideCustomView();
+        } else if (inAppRuffleFullscreen) {
+            toggleRuffleFullscreenCompat();
+        }
+    }
+
+    void resetForNavigation() {
+        if (customView != null) {
+            hideCustomView();
+        }
+        if (inAppRuffleFullscreen) {
+            exitInAppRuffleFullscreenMode();
+        }
+    }
+
+    void ensureStateMatchesPage() {
+        if (!inAppRuffleFullscreen) {
+            return;
+        }
+
+        String script =
+                "(function(){"
+                        + "var state=window.__androidRuffleFullscreen||null;"
+                        + "var target=document.querySelector('ruffle-player, ruffle-embed, ruffle-object');"
+                        + "if(!target){target=document.querySelector('embed[type*=\\\"shockwave\\\"], object[type*=\\\"shockwave\\\"], embed[src*=\\\".swf\\\"], object[data*=\\\".swf\\\"]');}"
+                        + "return !!(state&&state.active&&state.target&&target);"
+                        + "})();";
+        webView.evaluateJavascript(script, value -> {
+            boolean stillFullscreen = "true".equalsIgnoreCase(value == null ? "" : value.replace("\"", ""));
+            if (!stillFullscreen && inAppRuffleFullscreen) {
+                exitInAppRuffleFullscreenMode();
+            }
+        });
+    }
+
+    boolean handleBackPressed() {
+        if (customView != null) {
+            hideCustomView();
+            return true;
+        }
+        if (inAppRuffleFullscreen) {
+            toggleRuffleFullscreenCompat();
+            return true;
+        }
+        return false;
+    }
+
+    boolean isFullscreenActive() {
+        return customView != null || inAppRuffleFullscreen;
+    }
+
+    private void enterInAppRuffleFullscreenMode() {
+        if (inAppRuffleFullscreen) {
+            return;
+        }
+
+        inAppRuffleFullscreen = true;
+        if (topBar != null) {
+            topBar.setVisibility(View.GONE);
+        }
+        if (progressBar != null) {
+            progressBar.setVisibility(View.GONE);
+        }
+        showFullscreenControls();
+        setSystemBarsHidden(true);
+        requestInsetRefresh();
+    }
+
+    private void exitInAppRuffleFullscreenMode() {
+        if (!inAppRuffleFullscreen) {
+            return;
+        }
+
+        inAppRuffleFullscreen = false;
+        if (topBar != null) {
+            topBar.setVisibility(View.VISIBLE);
+        }
+        if (progressBar != null) {
+            progressBar.setVisibility(progressBar.getProgress() >= 100 ? View.GONE : View.VISIBLE);
+        }
+        hideFullscreenControls();
+        setSystemBarsHidden(false);
+        restoreOrientationAction.run();
+        requestInsetRefresh();
+    }
+
+    private void showFullscreenControls() {
+        if (fullscreenRotateButton != null) {
+            fullscreenRotateButton.setVisibility(View.VISIBLE);
+        }
+        if (fullscreenExitButton != null) {
+            fullscreenExitButton.setVisibility(View.VISIBLE);
+        }
+        if (fullscreenFeaturePanelButton != null) {
+            fullscreenFeaturePanelButton.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void hideFullscreenControls() {
+        if (fullscreenRotateButton != null) {
+            fullscreenRotateButton.setVisibility(View.GONE);
+        }
+        if (fullscreenExitButton != null) {
+            fullscreenExitButton.setVisibility(View.GONE);
+        }
+        if (fullscreenFeaturePanelButton != null) {
+            fullscreenFeaturePanelButton.setVisibility(View.GONE);
+        }
+    }
+
+    private void captureInsetAwareBaseValues() {
+        if (topBar != null) {
+            topBarBasePaddingLeft = topBar.getPaddingLeft();
+            topBarBasePaddingTop = topBar.getPaddingTop();
+            topBarBasePaddingRight = topBar.getPaddingRight();
+            topBarBasePaddingBottom = topBar.getPaddingBottom();
+        }
+        if (browserChrome != null) {
+            browserChromeBasePaddingLeft = browserChrome.getPaddingLeft();
+            browserChromeBasePaddingTop = browserChrome.getPaddingTop();
+            browserChromeBasePaddingRight = browserChrome.getPaddingRight();
+            browserChromeBasePaddingBottom = browserChrome.getPaddingBottom();
+        }
+        if (fullscreenRotateButton != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenRotateButton.getLayoutParams();
+            fullscreenRotateBaseTopMargin = params.topMargin;
+            fullscreenRotateBaseRightMargin = params.rightMargin;
+        }
+        if (fullscreenExitButton != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenExitButton.getLayoutParams();
+            fullscreenExitBaseTopMargin = params.topMargin;
+            fullscreenExitBaseRightMargin = params.rightMargin;
+        }
+    }
+
+    private void installWindowInsetHandlers() {
+        View root = activity.findViewById(android.R.id.content);
+        if (root == null) {
+            return;
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            boolean fullscreenActive = isFullscreenActive();
+            if (browserChrome != null) {
+                int left = fullscreenActive ? 0 : browserChromeBasePaddingLeft + systemBars.left;
+                int top = fullscreenActive ? 0 : browserChromeBasePaddingTop;
+                int right = fullscreenActive ? 0 : browserChromeBasePaddingRight + systemBars.right;
+                int bottom = fullscreenActive ? 0 : browserChromeBasePaddingBottom + systemBars.bottom;
+                browserChrome.setPadding(left, top, right, bottom);
+            }
+            if (topBar != null) {
+                topBar.setPadding(
+                        topBarBasePaddingLeft + systemBars.left,
+                        topBarBasePaddingTop + systemBars.top,
+                        topBarBasePaddingRight + systemBars.right,
+                        topBarBasePaddingBottom
+                );
+            }
+            applyFullscreenButtonInsets(systemBars);
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(root);
+    }
+
+    private void applyFullscreenButtonInsets(Insets systemBars) {
+        if (fullscreenRotateButton != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenRotateButton.getLayoutParams();
+            params.topMargin = fullscreenRotateBaseTopMargin + systemBars.top;
+            params.rightMargin = fullscreenRotateBaseRightMargin + systemBars.right;
+            fullscreenRotateButton.setLayoutParams(params);
+        }
+        if (fullscreenExitButton != null) {
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) fullscreenExitButton.getLayoutParams();
+            params.topMargin = fullscreenExitBaseTopMargin + systemBars.top;
+            params.rightMargin = fullscreenExitBaseRightMargin + systemBars.right;
+            fullscreenExitButton.setLayoutParams(params);
+        }
+    }
+
+    private void requestInsetRefresh() {
+        View root = activity.findViewById(android.R.id.content);
+        if (root != null) {
+            ViewCompat.requestApplyInsets(root);
+        }
+    }
+
+    private void setSystemBarsHidden(boolean hidden) {
+        WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(activity.getWindow(), activity.getWindow().getDecorView());
+        if (controller == null) {
+            return;
+        }
+        if (hidden) {
+            controller.setSystemBarsBehavior(
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            );
+            controller.hide(WindowInsetsCompat.Type.systemBars());
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars());
+        }
+    }
 }
 
 final class BrowserTouchController {
