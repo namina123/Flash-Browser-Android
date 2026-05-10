@@ -2,6 +2,7 @@ package com.oxgames.rufflewrapper;
 
 import android.content.Context;
 import android.net.Uri;
+import android.os.Environment;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -27,9 +28,11 @@ final class LocalMappingManager {
     private static final String CONFIG_FILE_NAME = "local_mappings.json";
     private static final String PVZOL_HOST = "pvzol.org";
     private static final String PVZOL_MAIN_PATH = "/pvz/index.php/default/main";
+    private static final String BUILT_IN_CACHE_DIR_NAME = "PVZOLcache";
 
     private final Context context;
     private final File configFile;
+    private final File builtInCacheDir;
     private List<MappingRule> cachedRules = Collections.emptyList();
     private long lastLoadedTimestamp = -1L;
 
@@ -40,9 +43,14 @@ final class LocalMappingManager {
             baseDir = new File(this.context.getFilesDir(), "config");
         }
         this.configFile = new File(baseDir, CONFIG_FILE_NAME);
+        File externalRoot = Environment.getExternalStorageDirectory();
+        this.builtInCacheDir = externalRoot == null
+                ? new File(this.context.getFilesDir(), BUILT_IN_CACHE_DIR_NAME)
+                : new File(externalRoot, BUILT_IN_CACHE_DIR_NAME);
     }
 
     void initialize() {
+        ensureBuiltInCacheDir();
         ensureDefaultConfig();
         reloadIfNeeded(true);
     }
@@ -72,7 +80,7 @@ final class LocalMappingManager {
     }
 
     private MappedResource resolveBuiltIn(Uri uri) {
-        if (uri == null || !isPvzolHost(uri.getHost())) {
+        if (uri == null || !isBuiltInMappedHost(uri.getHost())) {
             return null;
         }
 
@@ -81,7 +89,17 @@ final class LocalMappingManager {
             return null;
         }
 
-        List<String> candidates = buildPvzolAssetCandidates(path);
+        String relativePath = MappingRule.sanitizeRelativePath(stripLeadingSlash(path));
+        if (TextUtils.isEmpty(relativePath)) {
+            return null;
+        }
+
+        MappedResource cacheResource = tryOpenBuiltInCacheFile(relativePath);
+        if (cacheResource != null) {
+            return cacheResource;
+        }
+
+        List<String> candidates = buildPvzolAssetCandidates(relativePath);
         for (String candidate : candidates) {
             MappedResource resource = tryOpenAsset(candidate);
             if (resource != null) {
@@ -91,12 +109,16 @@ final class LocalMappingManager {
         return null;
     }
 
-    private boolean isPvzolHost(String host) {
+    private boolean isBuiltInMappedHost(String host) {
         if (host == null) {
             return false;
         }
         String normalizedHost = host.trim().toLowerCase(Locale.US);
-        return normalizedHost.equals(PVZOL_HOST) || normalizedHost.endsWith("." + PVZOL_HOST);
+        return normalizedHost.equals(PVZOL_HOST)
+                || normalizedHost.endsWith("." + PVZOL_HOST)
+                || normalizedHost.contains("youkia.pvz")
+                || normalizedHost.contains("pvz.youkia")
+                || normalizedHost.endsWith(".youkia.com");
     }
 
     private String normalizeRequestPath(String value) {
@@ -104,9 +126,9 @@ final class LocalMappingManager {
         return path.isEmpty() ? "/" : path;
     }
 
-    private List<String> buildPvzolAssetCandidates(String path) {
+    private List<String> buildPvzolAssetCandidates(String relativePath) {
         Set<String> candidates = new LinkedHashSet<>();
-        addCandidate(candidates, "resource/" + stripLeadingSlash(path));
+        addCandidate(candidates, "resource/" + relativePath);
         return new ArrayList<>(candidates);
     }
 
@@ -133,6 +155,28 @@ final class LocalMappingManager {
             return MappingRule.openAsset(context, assetPath);
         } catch (IOException e) {
             return null;
+        }
+    }
+
+    private MappedResource tryOpenBuiltInCacheFile(String relativePath) {
+        try {
+            File target = new File(builtInCacheDir, relativePath);
+            if (!MappingRule.isInside(builtInCacheDir, target) || !target.isFile()) {
+                return null;
+            }
+            return MappingRule.openLocalFile(target);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private void ensureBuiltInCacheDir() {
+        try {
+            if (!builtInCacheDir.exists() && !builtInCacheDir.mkdirs()) {
+                Log.w(TAG, "Unable to create built-in cache dir: " + builtInCacheDir);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Unable to prepare built-in cache dir: " + builtInCacheDir, e);
         }
     }
 
