@@ -7,12 +7,12 @@ import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
 
 final class DutyRequestQueue {
 
@@ -29,6 +29,10 @@ final class DutyRequestQueue {
             this.label = label;
             this.baseUrl = baseUrl;
             this.cookies = cookies;
+        }
+
+        String uniqueKey() {
+            return baseUrl + "\n" + cookies;
         }
     }
 
@@ -74,10 +78,12 @@ final class DutyRequestQueue {
 
     private final Object lock = new Object();
     private final ArrayList<String> logs = new ArrayList<>();
+    private final ArrayList<RequestTask> pendingTasks = new ArrayList<>();
     private final CopyOnWriteArrayList<ActiveConnection> activeConnections = new CopyOnWriteArrayList<>();
+    private final HashMap<String, Long> cookieCooldownUntilMs = new HashMap<>();
+    private final HashSet<String> inFlightCookieKeys = new HashSet<>();
 
     private Listener listener;
-    private BlockingQueue<RequestTask> queue;
     private ExecutorService executor;
     private boolean running;
     private boolean paused;
@@ -88,6 +94,7 @@ final class DutyRequestQueue {
     private int skipped;
     private int active;
     private int requestIntervalMs;
+    private int frequentRetryIntervalMs;
     private long nextDispatchUptimeMs;
 
     void setListener(Listener listener) {
@@ -103,7 +110,12 @@ final class DutyRequestQueue {
         }
     }
 
-    void startDailyDutyRewards(List<CookieTarget> targets, int concurrency, int requestIntervalMs) {
+    void startDailyDutyRewards(
+            List<CookieTarget> targets,
+            int concurrency,
+            int requestIntervalMs,
+            int frequentRetryIntervalMs
+    ) {
         synchronized (lock) {
             if (running || paused || cancelling) {
                 appendLogLocked("Queue is already running.");
@@ -111,14 +123,17 @@ final class DutyRequestQueue {
                 return;
             }
 
-            queue = new LinkedBlockingQueue<>();
+            pendingTasks.clear();
             logs.clear();
+            cookieCooldownUntilMs.clear();
+            inFlightCookieKeys.clear();
             completed = 0;
             failed = 0;
             skipped = 0;
             active = 0;
             total = 0;
             this.requestIntervalMs = Math.max(0, requestIntervalMs);
+            this.frequentRetryIntervalMs = Math.max(0, frequentRetryIntervalMs);
             nextDispatchUptimeMs = 0L;
             cancelling = false;
             paused = false;
@@ -133,7 +148,7 @@ final class DutyRequestQueue {
                     appendLogLocked("Skip " + target.label + ": base URL contains pvzol.org");
                     continue;
                 }
-                queue.add(RequestTask.discovery(target));
+                pendingTasks.add(RequestTask.discovery(target));
                 total += 1;
             }
 
@@ -146,7 +161,8 @@ final class DutyRequestQueue {
             running = true;
             appendLogLocked("Queue started. targets=" + total
                     + ", concurrency=" + Math.max(1, concurrency)
-                    + ", interval=" + this.requestIntervalMs + "ms");
+                    + ", interval=" + this.requestIntervalMs + "ms"
+                    + ", frequentInterval=" + this.frequentRetryIntervalMs + "ms");
             executor = java.util.concurrent.Executors.newFixedThreadPool(Math.max(1, concurrency));
             for (int i = 0; i < Math.max(1, concurrency); i += 1) {
                 executor.execute(this::workerLoop);
@@ -185,9 +201,7 @@ final class DutyRequestQueue {
             }
             cancelling = true;
             paused = false;
-            if (queue != null) {
-                queue.clear();
-            }
+            pendingTasks.clear();
             lock.notifyAll();
             appendLogLocked("Queue cancelling...");
         }
@@ -213,44 +227,9 @@ final class DutyRequestQueue {
 
     private void workerLoop() {
         while (true) {
-            RequestTask task;
-            synchronized (lock) {
-                while (paused && !cancelling) {
-                    try {
-                        lock.wait();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
-                }
-                if (cancelling) {
-                    break;
-                }
-
-                task = queue == null ? null : queue.poll();
-                if (task == null) {
-                    if (active == 0) {
-                        finishLocked("Queue finished.");
-                        return;
-                    }
-                } else {
-                    active += 1;
-                    notifyListenerLocked();
-                }
-            }
-
+            RequestTask task = awaitNextTask();
             if (task == null) {
-                try {
-                    Thread.sleep(120L);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-                continue;
-            }
-
-            if (!awaitDispatchWindow()) {
-                break;
+                return;
             }
 
             try {
@@ -261,8 +240,10 @@ final class DutyRequestQueue {
                 }
             } finally {
                 synchronized (lock) {
+                    inFlightCookieKeys.remove(task.cookieKey());
                     active -= 1;
                     completed += 1;
+                    lock.notifyAll();
                     if (cancelling && active == 0) {
                         finishLocked("Queue cancelled.");
                     } else {
@@ -271,10 +252,64 @@ final class DutyRequestQueue {
                 }
             }
         }
+    }
 
-        synchronized (lock) {
-            if (active == 0) {
-                finishLocked("Queue cancelled.");
+    private RequestTask awaitNextTask() {
+        while (true) {
+            synchronized (lock) {
+                while (paused && !cancelling) {
+                    try {
+                        lock.wait();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
+                if (cancelling) {
+                    return null;
+                }
+
+                if (pendingTasks.isEmpty()) {
+                    if (active == 0) {
+                        finishLocked("Queue finished.");
+                        return null;
+                    }
+                    waitLocked(120L);
+                    continue;
+                }
+
+                long now = SystemClock.uptimeMillis();
+                long earliestWakeUptimeMs = nextDispatchUptimeMs > now ? nextDispatchUptimeMs : Long.MAX_VALUE;
+                for (int i = 0; i < pendingTasks.size(); i += 1) {
+                    RequestTask task = pendingTasks.get(i);
+                    String cookieKey = task.cookieKey();
+                    if (inFlightCookieKeys.contains(cookieKey)) {
+                        continue;
+                    }
+                    long cooldownUntilMs = cookieCooldownUntilMs.containsKey(cookieKey)
+                            ? cookieCooldownUntilMs.get(cookieKey).longValue()
+                            : 0L;
+                    if (cooldownUntilMs > now) {
+                        earliestWakeUptimeMs = Math.min(earliestWakeUptimeMs, cooldownUntilMs);
+                        continue;
+                    }
+                    if (nextDispatchUptimeMs > now) {
+                        continue;
+                    }
+
+                    pendingTasks.remove(i);
+                    active += 1;
+                    inFlightCookieKeys.add(cookieKey);
+                    nextDispatchUptimeMs = now + requestIntervalMs;
+                    notifyListenerLocked();
+                    return task;
+                }
+
+                long waitMs = 120L;
+                if (earliestWakeUptimeMs != Long.MAX_VALUE) {
+                    waitMs = Math.max(1L, earliestWakeUptimeMs - now);
+                }
+                waitLocked(Math.min(waitMs, 500L));
             }
         }
     }
@@ -285,6 +320,11 @@ final class DutyRequestQueue {
         try {
             PvzolAmfClient.Response response =
                     PvzolAmfClient.postDutyGetAll(task.target.baseUrl, task.target.cookies, activeConnection);
+            if (response.containsFrequentMessage()) {
+                handleFrequentResponse(task, response, "api.duty.getAll");
+                return;
+            }
+
             boolean success = response.httpStatusCode >= 200
                     && response.httpStatusCode < 300
                     && response.isApplicationSuccess();
@@ -313,11 +353,12 @@ final class DutyRequestQueue {
                     appendLogLocked("No reward request generated for " + task.target.label + ".");
                 } else {
                     for (PvzolAmfClient.RewardRequest rewardRequest : plan.rewardRequests) {
-                        queue.add(RequestTask.reward(task.target, rewardRequest.rewardId, rewardRequest.category));
+                        pendingTasks.add(RequestTask.reward(task.target, rewardRequest.rewardId, rewardRequest.category));
                         total += 1;
                     }
                     appendLogLocked("Loaded task list for " + task.target.label
                             + ", queued " + plan.rewardRequests.size() + " reward requests.");
+                    lock.notifyAll();
                     notifyListenerLocked();
                 }
             }
@@ -342,6 +383,11 @@ final class DutyRequestQueue {
                     task.category,
                     activeConnection
             );
+            if (response.containsFrequentMessage()) {
+                handleFrequentResponse(task, response, "api.duty.reward [" + task.rewardId + "," + task.category + "]");
+                return;
+            }
+
             boolean success = response.httpStatusCode >= 200
                     && response.httpStatusCode < 300
                     && response.isApplicationSuccess();
@@ -368,35 +414,21 @@ final class DutyRequestQueue {
         }
     }
 
-    private boolean awaitDispatchWindow() {
-        while (true) {
-            long delayMs;
-            synchronized (lock) {
-                while (paused && !cancelling) {
-                    try {
-                        lock.wait();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return false;
-                    }
-                }
-                if (cancelling) {
-                    return false;
-                }
-                long now = SystemClock.uptimeMillis();
-                long earliest = Math.max(now, nextDispatchUptimeMs);
-                delayMs = earliest - now;
-                if (delayMs <= 0L) {
-                    nextDispatchUptimeMs = now + requestIntervalMs;
-                    return true;
-                }
+    private void handleFrequentResponse(RequestTask task, PvzolAmfClient.Response response, String operationLabel) {
+        synchronized (lock) {
+            failed += 1;
+            long resumeUptimeMs = SystemClock.uptimeMillis() + frequentRetryIntervalMs;
+            cookieCooldownUntilMs.put(task.cookieKey(), Long.valueOf(resumeUptimeMs));
+            if (!cancelling) {
+                pendingTasks.add(task);
+                total += 1;
             }
-            try {
-                Thread.sleep(Math.min(delayMs, 250L));
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
-            }
+            appendLogLocked(task.target.label + " " + operationLabel
+                    + " failed: response contains 频繁, cooldown "
+                    + frequentRetryIntervalMs + "ms"
+                    + (TextUtils.isEmpty(response.description) ? "" : ", " + response.description));
+            lock.notifyAll();
+            notifyListenerLocked();
         }
     }
 
@@ -405,6 +437,9 @@ final class DutyRequestQueue {
         paused = false;
         cancelling = false;
         appendLogLocked(message);
+        pendingTasks.clear();
+        inFlightCookieKeys.clear();
+        cookieCooldownUntilMs.clear();
         if (executor != null) {
             executor.shutdown();
             executor = null;
@@ -419,14 +454,21 @@ final class DutyRequestQueue {
         logs.add(message);
     }
 
+    private void waitLocked(long waitMs) {
+        try {
+            lock.wait(waitMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private StateSnapshot buildSnapshotLocked() {
-        int queued = queue == null ? 0 : queue.size();
         return new StateSnapshot(
                 running,
                 paused,
                 cancelling,
                 total,
-                queued,
+                pendingTasks.size(),
                 active,
                 completed,
                 failed,
@@ -465,6 +507,10 @@ final class DutyRequestQueue {
             this.target = target;
             this.rewardId = rewardId;
             this.category = category;
+        }
+
+        String cookieKey() {
+            return target.uniqueKey();
         }
 
         static RequestTask discovery(CookieTarget target) {

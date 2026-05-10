@@ -69,16 +69,28 @@ final class PvzolAmfClient {
         final Object decodedValue;
         final Integer applicationStatus;
         final String description;
+        final String responseText;
 
-        Response(int httpStatusCode, Object decodedValue, Integer applicationStatus, String description) {
+        Response(
+                int httpStatusCode,
+                Object decodedValue,
+                Integer applicationStatus,
+                String description,
+                String responseText
+        ) {
             this.httpStatusCode = httpStatusCode;
             this.decodedValue = decodedValue;
             this.applicationStatus = applicationStatus;
             this.description = description;
+            this.responseText = responseText;
         }
 
         boolean isApplicationSuccess() {
             return applicationStatus == null || applicationStatus.intValue() == 0;
+        }
+
+        boolean containsFrequentMessage() {
+            return responseText != null && responseText.contains("频繁");
         }
     }
 
@@ -198,6 +210,7 @@ final class PvzolAmfClient {
         Object decodedValue = null;
         Integer applicationStatus = null;
         String description = null;
+        String responseText = null;
 
         if (responseBytes.length > 0) {
             Amf0Message responseMessage = AmfCodec.decodeAmf0Message(responseBytes);
@@ -205,11 +218,12 @@ final class PvzolAmfClient {
                 decodedValue = unwrapResponseValue(responseMessage.getBodies().get(0).getValue());
                 applicationStatus = extractApplicationStatus(decodedValue);
                 description = extractDescription(decodedValue);
+                responseText = stringifyDecodedValue(decodedValue);
             }
         }
 
         connection.disconnect();
-        return new Response(httpStatusCode, decodedValue, applicationStatus, description);
+        return new Response(httpStatusCode, decodedValue, applicationStatus, description, responseText);
     }
 
     private static void addMainTaskRewards(
@@ -221,9 +235,7 @@ final class PvzolAmfClient {
         Integer foundId = findTaskIdInRange(entry, startInclusive, endInclusive);
         if (foundId == null) {
             addRange(rewardIds, startInclusive, endInclusive);
-        } else if (foundId.intValue() <= startInclusive) {
-            addRange(rewardIds, startInclusive, startInclusive);
-        } else {
+        } else if (foundId.intValue() > startInclusive) {
             addRange(rewardIds, startInclusive, foundId.intValue() - 1);
         }
     }
@@ -409,6 +421,61 @@ final class PvzolAmfClient {
             return ((Amf3Object) value).getValue();
         }
         return value;
+    }
+
+    private static String stringifyDecodedValue(Object value) {
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof Amf3Object) {
+            return stringifyDecodedValue(((Amf3Object) value).getValue());
+        }
+        if (value instanceof AsObject) {
+            StringBuilder builder = new StringBuilder();
+            AsObject object = (AsObject) value;
+            for (Map.Entry<String, Object> entry : object.entrySet()) {
+                if (builder.length() > 0) {
+                    builder.append(' ');
+                }
+                builder.append(entry.getKey()).append('=').append(stringifyDecodedValue(entry.getValue()));
+            }
+            return builder.toString();
+        }
+        if (value instanceof Map<?, ?>) {
+            StringBuilder builder = new StringBuilder();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                if (builder.length() > 0) {
+                    builder.append(' ');
+                }
+                builder.append(String.valueOf(entry.getKey()))
+                        .append('=')
+                        .append(stringifyDecodedValue(entry.getValue()));
+            }
+            return builder.toString();
+        }
+        if (value instanceof Collection<?>) {
+            StringBuilder builder = new StringBuilder();
+            for (Object child : (Collection<?>) value) {
+                if (builder.length() > 0) {
+                    builder.append(' ');
+                }
+                builder.append(stringifyDecodedValue(child));
+            }
+            return builder.toString();
+        }
+        Class<?> valueClass = value.getClass();
+        if (valueClass.isArray()) {
+            int length = Array.getLength(value);
+            StringBuilder builder = new StringBuilder();
+            for (int i = 0; i < length; i += 1) {
+                if (builder.length() > 0) {
+                    builder.append(' ');
+                }
+                builder.append(stringifyDecodedValue(Array.get(value, i)));
+            }
+            return builder.toString();
+        }
+        return String.valueOf(value);
     }
 
     private static Integer extractApplicationStatus(Object value) {

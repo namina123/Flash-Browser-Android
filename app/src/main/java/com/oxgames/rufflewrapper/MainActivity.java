@@ -90,6 +90,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_RUFFLE_FONT_MODE = "ruffle_font_mode";
     private static final String PREF_PANEL_CONCURRENCY = "panel_concurrency";
     private static final String PREF_PANEL_REQUEST_INTERVAL = "panel_request_interval";
+    private static final String PREF_PANEL_FREQUENT_RETRY_INTERVAL = "panel_frequent_retry_interval";
     private static final String PREF_PANEL_SELECTED_COOKIE_KEYS = "panel_selected_cookie_keys";
     private static final String PREF_PANEL_SELECT_CURRENT_PAGE_COOKIE = "panel_select_current_page_cookie";
     private static final String PREF_PANEL_TASK_DAILY_DUTY = "panel_task_daily_duty";
@@ -232,6 +233,7 @@ public class MainActivity extends AppCompatActivity {
     private Button featurePanelSelectAllCookiesButton;
     private EditText featurePanelConcurrencyInput;
     private EditText featurePanelRequestIntervalInput;
+    private EditText featurePanelFrequentRetryIntervalInput;
     private Button featurePanelPauseResumeButton;
     private Button featurePanelCancelButton;
     private CheckBox featurePanelDailyDutyCheckBox;
@@ -1895,6 +1897,7 @@ public class MainActivity extends AppCompatActivity {
         featurePanelSelectAllCookiesButton = dialogView.findViewById(R.id.btn_panel_select_all_cookies);
         featurePanelConcurrencyInput = dialogView.findViewById(R.id.input_panel_concurrency);
         featurePanelRequestIntervalInput = dialogView.findViewById(R.id.input_panel_request_interval);
+        featurePanelFrequentRetryIntervalInput = dialogView.findViewById(R.id.input_panel_frequent_retry_interval);
         featurePanelPauseResumeButton = dialogView.findViewById(R.id.btn_panel_pause_resume);
         featurePanelCancelButton = dialogView.findViewById(R.id.btn_panel_cancel);
         featurePanelDailyDutyCheckBox = dialogView.findViewById(R.id.check_panel_daily_duty);
@@ -1919,6 +1922,7 @@ public class MainActivity extends AppCompatActivity {
 
         featurePanelConcurrencyInput.setText(String.valueOf(getSavedPanelConcurrency()));
         featurePanelRequestIntervalInput.setText(String.valueOf(getSavedPanelRequestInterval()));
+        featurePanelFrequentRetryIntervalInput.setText(String.valueOf(getSavedPanelFrequentRetryInterval()));
         featurePanelDailyDutyCheckBox.setChecked(preferences.getBoolean(PREF_PANEL_TASK_DAILY_DUTY, false));
         featurePanelDailyDutyCheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
                 preferences.edit().putBoolean(PREF_PANEL_TASK_DAILY_DUTY, isChecked).apply());
@@ -1990,6 +1994,7 @@ public class MainActivity extends AppCompatActivity {
         featurePanelSelectAllCookiesButton = null;
         featurePanelConcurrencyInput = null;
         featurePanelRequestIntervalInput = null;
+        featurePanelFrequentRetryIntervalInput = null;
         featurePanelPauseResumeButton = null;
         featurePanelCancelButton = null;
         featurePanelDailyDutyCheckBox = null;
@@ -2927,6 +2932,14 @@ public class MainActivity extends AppCompatActivity {
         preferences.edit().putInt(PREF_PANEL_REQUEST_INTERVAL, Math.max(0, intervalMs)).apply();
     }
 
+    private int getSavedPanelFrequentRetryInterval() {
+        return Math.max(0, preferences.getInt(PREF_PANEL_FREQUENT_RETRY_INTERVAL, 14000));
+    }
+
+    private void savePanelFrequentRetryInterval(int intervalMs) {
+        preferences.edit().putInt(PREF_PANEL_FREQUENT_RETRY_INTERVAL, Math.max(0, intervalMs)).apply();
+    }
+
     private void switchFeaturePanelTab(int tab) {
         if (featurePanelCookiePage != null) {
             featurePanelCookiePage.setVisibility(tab == FEATURE_PANEL_TAB_COOKIE ? View.VISIBLE : View.GONE);
@@ -2986,7 +2999,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startDailyDutyRequestsFromPanel(boolean startCheckedItemsOnly) {
-        if (featurePanelConcurrencyInput == null || featurePanelRequestIntervalInput == null) {
+        if (featurePanelConcurrencyInput == null
+                || featurePanelRequestIntervalInput == null
+                || featurePanelFrequentRetryIntervalInput == null) {
             return;
         }
         if (dutyRequestQueue.isBusy()) {
@@ -3003,6 +3018,12 @@ public class MainActivity extends AppCompatActivity {
         );
         savePanelRequestInterval(requestIntervalMs);
         featurePanelRequestIntervalInput.setText(String.valueOf(requestIntervalMs));
+        int frequentRetryIntervalMs = parseNonNegativeInt(
+                featurePanelFrequentRetryIntervalInput.getText().toString(),
+                getSavedPanelFrequentRetryInterval()
+        );
+        savePanelFrequentRetryInterval(frequentRetryIntervalMs);
+        featurePanelFrequentRetryIntervalInput.setText(String.valueOf(frequentRetryIntervalMs));
 
         boolean dailyDutyChecked = featurePanelDailyDutyCheckBox != null && featurePanelDailyDutyCheckBox.isChecked();
         if (startCheckedItemsOnly && !dailyDutyChecked) {
@@ -3030,7 +3051,12 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        dutyRequestQueue.startDailyDutyRewards(new ArrayList<>(deduplicatedTargets.values()), concurrency, requestIntervalMs);
+        dutyRequestQueue.startDailyDutyRewards(
+                new ArrayList<>(deduplicatedTargets.values()),
+                concurrency,
+                requestIntervalMs,
+                frequentRetryIntervalMs
+        );
     }
 
     private int parsePositiveInt(String value, int fallback) {

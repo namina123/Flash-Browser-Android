@@ -164,6 +164,28 @@
                     android:paddingEnd="10dp"
                     android:textColor="#111827" />
 
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="频繁请求间隔 (ms)"
+                    android:textColor="#111827"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/input_panel_frequent_retry_interval"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="8dp"
+                    android:background="#ffffff"
+                    android:ems="10"
+                    android:inputType="number"
+                    android:maxLines="1"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:textColor="#111827" />
+
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"

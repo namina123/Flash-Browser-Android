@@ -106,14 +106,13 @@ public class AmfCodecTest {
         PvzolAmfClient.DutyTaskPlan plan = PvzolAmfClient.planDutyRewardRequests(root);
 
         assertTrue(plan.hasMainTask);
-        assertEquals(7, plan.rewardRequests.size());
+        assertEquals(6, plan.rewardRequests.size());
         assertReward(plan.rewardRequests.get(0), 1, 3);
         assertReward(plan.rewardRequests.get(1), 2, 3);
         assertReward(plan.rewardRequests.get(2), 3, 3);
         assertReward(plan.rewardRequests.get(3), 4, 3);
         assertReward(plan.rewardRequests.get(4), 5, 3);
         assertReward(plan.rewardRequests.get(5), 6, 3);
-        assertReward(plan.rewardRequests.get(6), 12, 3);
     }
 
     @Test
@@ -133,12 +132,28 @@ public class AmfCodecTest {
             rewardIds.add(Integer.valueOf(rewardRequest.rewardId));
         }
 
-        assertTrue(rewardIds.contains(Integer.valueOf(1)));
-        assertTrue(rewardIds.contains(Integer.valueOf(12)));
+        assertFalse(rewardIds.contains(Integer.valueOf(1)));
+        assertFalse(rewardIds.contains(Integer.valueOf(12)));
         assertTrue(rewardIds.contains(Integer.valueOf(21)));
         assertTrue(rewardIds.contains(Integer.valueOf(22)));
         assertTrue(rewardIds.contains(Integer.valueOf(23)));
         assertFalse(rewardIds.contains(Integer.valueOf(61)));
+    }
+
+    @Test
+    public void dutyTaskPlanSkipsRangeStartIdsForAllRanges() {
+        AsObject root = new AsObject();
+        root.put("mainTask", Arrays.asList(taskWithId(1), taskWithId(12)));
+        root.put("sideTask", Arrays.asList(
+                taskWithId(21), taskWithId(24), taskWithId(28), taskWithId(35), taskWithId(43),
+                taskWithId(45), taskWithId(47), taskWithId(49), taskWithId(51), taskWithId(53),
+                taskWithId(55), taskWithId(57), taskWithId(59), taskWithId(61), taskWithId(62),
+                taskWithId(65), taskWithId(70)
+        ));
+
+        PvzolAmfClient.DutyTaskPlan plan = PvzolAmfClient.planDutyRewardRequests(root);
+        assertTrue(plan.hasMainTask);
+        assertTrue(plan.rewardRequests.isEmpty());
     }
 
     @Test
