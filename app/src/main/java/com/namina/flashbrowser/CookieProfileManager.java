@@ -25,6 +25,11 @@ final class CookieProfileManager {
     private static final String ASSET_COOKIE_DIR = "cookies";
     private static final String OUTPUT_DIR_NAME = "PVZOLcookies";
     private static final String TARGET_PATH = "/pvz/index.php/default/main";
+    private static final String COOKIE_KEY_PHPSESSID = "PHPSESSID";
+    private static final String COOKIE_KEY_PVZ = "pvz";
+    private static final String COOKIE_KEY_PVZOL = "pvzol";
+    private static final String COOKIE_KEY_PVZ_YOUKIA_NEW1 = "pvz_youkia_new1";
+    private static final String COOKIE_KEY_YOUKIA = "youkia";
     private static final String[] SAVE_URL_KEYWORDS = new String[] {
             "pvzol",
             "youkia.pvz",
@@ -205,6 +210,11 @@ final class CookieProfileManager {
             return null;
         }
 
+        String persistedCookies = selectPersistedCookies(cookies);
+        if (TextUtils.isEmpty(persistedCookies)) {
+            return null;
+        }
+
         String userDomain = resolveSaveUserDomain(pageUri);
         if (TextUtils.isEmpty(userDomain)) {
             return null;
@@ -220,7 +230,7 @@ final class CookieProfileManager {
 
         String fileName = buildUniqueFileName(userName);
         File outputFile = new File(getRootDirectory(), fileName);
-        String xml = buildProfileXml(userDomain, cookies.trim(), userName);
+        String xml = buildProfileXml(userDomain, persistedCookies, userName);
 
         try (FileOutputStream outputStream = new FileOutputStream(outputFile)) {
             outputStream.write(xml.getBytes(StandardCharsets.UTF_8));
@@ -350,6 +360,113 @@ final class CookieProfileManager {
 
     private static String safeLower(String value) {
         return value == null ? "" : value.trim().toLowerCase(java.util.Locale.US);
+    }
+
+    static String selectPersistedCookies(String rawCookies) {
+        String effectiveCookies = extractEffectiveCookies(rawCookies);
+        if (!TextUtils.isEmpty(effectiveCookies)) {
+            return effectiveCookies;
+        }
+        if (TextUtils.isEmpty(rawCookies)) {
+            return null;
+        }
+        return rawCookies.trim();
+    }
+
+    static List<String> buildCookieApplicationList(String rawCookies) {
+        String effectiveCookies = extractEffectiveCookies(rawCookies);
+        if (!TextUtils.isEmpty(effectiveCookies)) {
+            return splitCookieEntries(effectiveCookies);
+        }
+        return splitCookieEntries(rawCookies);
+    }
+
+    private static String extractEffectiveCookies(String rawCookies) {
+        List<String> entries = splitCookieEntries(rawCookies);
+        if (entries.isEmpty()) {
+            return null;
+        }
+
+        ArrayList<String> selectedEntries = new ArrayList<>(5);
+        int phpSessionCount = 0;
+        boolean hasPvz = false;
+        boolean hasPvzYoukiaNew1 = false;
+        boolean hasYoukia = false;
+
+        for (String entry : entries) {
+            String key = getCookieKey(entry);
+            if (TextUtils.isEmpty(key)) {
+                continue;
+            }
+
+            if (COOKIE_KEY_PHPSESSID.equalsIgnoreCase(key)) {
+                if (phpSessionCount < 2) {
+                    selectedEntries.add(entry);
+                }
+                phpSessionCount += 1;
+                continue;
+            }
+
+            if (!hasPvz && COOKIE_KEY_PVZ.equalsIgnoreCase(key)) {
+                selectedEntries.add(entry);
+                hasPvz = true;
+                continue;
+            }
+
+            if (!hasPvzYoukiaNew1 && COOKIE_KEY_PVZ_YOUKIA_NEW1.equalsIgnoreCase(key)) {
+                selectedEntries.add(entry);
+                hasPvzYoukiaNew1 = true;
+                continue;
+            }
+
+            if (!hasYoukia && COOKIE_KEY_YOUKIA.equalsIgnoreCase(key)) {
+                selectedEntries.add(entry);
+                hasYoukia = true;
+            }
+        }
+
+        if (phpSessionCount >= 2 && hasPvz && hasPvzYoukiaNew1 && hasYoukia && selectedEntries.size() == 5) {
+            return TextUtils.join("; ", selectedEntries);
+        }
+
+        for (String entry : entries) {
+            String key = getCookieKey(entry);
+            if (COOKIE_KEY_PVZOL.equalsIgnoreCase(key)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    private static List<String> splitCookieEntries(String rawCookies) {
+        if (TextUtils.isEmpty(rawCookies)) {
+            return Collections.emptyList();
+        }
+
+        ArrayList<String> entries = new ArrayList<>();
+        String[] parts = rawCookies.split(";");
+        for (String part : parts) {
+            if (part == null) {
+                continue;
+            }
+            String entry = part.trim();
+            if (TextUtils.isEmpty(entry) || entry.indexOf('=') <= 0) {
+                continue;
+            }
+            entries.add(entry);
+        }
+        return entries;
+    }
+
+    private static String getCookieKey(String cookieEntry) {
+        if (TextUtils.isEmpty(cookieEntry)) {
+            return null;
+        }
+        int index = cookieEntry.indexOf('=');
+        if (index <= 0) {
+            return null;
+        }
+        return cookieEntry.substring(0, index).trim();
     }
 
     private String escapeXml(String value) {

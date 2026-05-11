@@ -3830,8 +3830,16 @@ final class BrowserSettingsController {
         String targetUrl = CookieProfileManager.buildTargetUrl(profile);
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(true);
-        cookieManager.setCookie(profile.userDomain, profile.userCookies);
-        cookieManager.setCookie(targetUrl, profile.userCookies);
+        List<String> cookieEntries = CookieProfileManager.buildCookieApplicationList(profile.userCookies);
+        if (cookieEntries.isEmpty()) {
+            cookieManager.setCookie(profile.userDomain, profile.userCookies);
+            cookieManager.setCookie(targetUrl, profile.userCookies);
+        } else {
+            for (String cookieEntry : cookieEntries) {
+                cookieManager.setCookie(profile.userDomain, cookieEntry);
+                cookieManager.setCookie(targetUrl, cookieEntry);
+            }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             cookieManager.flush();
         }
