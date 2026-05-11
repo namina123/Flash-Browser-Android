@@ -285,6 +285,17 @@ public class MainActivity extends AppCompatActivity {
         featurePanelDialogController.onResume();
     }
 
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (browserFullscreenController != null) {
+            browserFullscreenController.ensureStateMatchesPage();
+        }
+        if (browserRequestController != null && wrapper != null) {
+            browserRequestController.refreshPageCompatLayout(wrapper);
+        }
+    }
+
     private void setupWebView() {
         WebSettings webSettings = wrapper.getSettings();
         wrapper.setLayerType(View.LAYER_TYPE_HARDWARE, null);
@@ -348,7 +359,9 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 browserFullscreenController.ensureStateMatchesPage();
+                browserRequestController.refreshPageCompatLayout(view);
                 browserTouchController.refreshBridgeAvailability();
+                wrapper.postDelayed(() -> browserRequestController.refreshPageCompatLayout(view), 250L);
                 wrapper.postDelayed(browserTouchController::refreshBridgeAvailability, 600L);
                 browserNavigationController.onPageFinished(url);
             }
@@ -1834,6 +1847,7 @@ final class BrowserTouchController {
     private boolean hoverEnteredByHold;
     private boolean flashTouchBridgeAvailable;
     private boolean syntheticMouseHoverActive;
+    private boolean nativeScrollPreferred;
 
     private final Runnable hoverHoldRunnable = () -> {
         dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", true);
@@ -1900,6 +1914,7 @@ final class BrowserTouchController {
                 hoverModeArmedForClick = false;
                 hoverEnteredByHold = false;
                 syntheticMouseHoverActive = false;
+                nativeScrollPreferred = false;
                 gestureAnchorX = event.getX();
                 gestureAnchorY = event.getY();
                 webView.postDelayed(hoverHoldRunnable, HOVER_HOLD_MS);
@@ -1946,17 +1961,24 @@ final class BrowserTouchController {
                 if (movedBeyondTouchTolerance(event)) {
                     cancelPendingTouchGestures();
                     if (event.getPointerCount() == 1 && !simulatedHoverActive) {
-                        dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", true);
-                        dispatchSyntheticMouseHover(event.getX(), event.getY(), true);
-                        simulatedHoverActive = true;
-                        consumeTouchUntilGestureEnd = true;
-                        hoverModeArmedForClick = true;
-                        hoverEnteredByHold = false;
-                        syntheticMouseHoverActive = true;
-                        shouldConsume = true;
+                        float dx = event.getX() - gestureAnchorX;
+                        float dy = event.getY() - gestureAnchorY;
+                        boolean mostlyVerticalMove = Math.abs(dy) > Math.abs(dx) * 1.15f;
+                        if (mostlyVerticalMove) {
+                            nativeScrollPreferred = true;
+                        } else {
+                            dispatchTouchBridgeBooleanCall("setNativeTouchBlocked", true);
+                            dispatchSyntheticMouseHover(event.getX(), event.getY(), true);
+                            simulatedHoverActive = true;
+                            consumeTouchUntilGestureEnd = true;
+                            hoverModeArmedForClick = true;
+                            hoverEnteredByHold = false;
+                            syntheticMouseHoverActive = true;
+                            shouldConsume = true;
+                        }
                     }
                 }
-                shouldConsume = shouldConsume || event.getPointerCount() >= 2;
+                shouldConsume = shouldConsume || (!nativeScrollPreferred && event.getPointerCount() >= 2);
                 break;
             case MotionEvent.ACTION_POINTER_UP:
                 cancelPendingTouchGestures();
@@ -1986,6 +2008,7 @@ final class BrowserTouchController {
                 hoverModeArmedForClick = false;
                 hoverEnteredByHold = false;
                 syntheticMouseHoverActive = false;
+                nativeScrollPreferred = false;
                 break;
             case MotionEvent.ACTION_CANCEL:
                 cancelPendingTouchGestures();
@@ -1999,13 +2022,14 @@ final class BrowserTouchController {
                 consumeTouchUntilGestureEnd = false;
                 hoverModeArmedForClick = false;
                 hoverEnteredByHold = false;
+                nativeScrollPreferred = false;
                 break;
             default:
-                shouldConsume = shouldConsume || event.getPointerCount() >= 2;
+                shouldConsume = shouldConsume || (!nativeScrollPreferred && event.getPointerCount() >= 2);
                 break;
         }
 
-        return shouldConsume || event.getPointerCount() >= 2;
+        return shouldConsume || (!nativeScrollPreferred && event.getPointerCount() >= 2);
     }
 
     void resetBridgeAvailability() {
@@ -2252,6 +2276,13 @@ final class BrowserRequestController {
                     "(?is)<meta[^>]+http-equiv\\s*=\\s*['\\\"]Content-Security-Policy['\\\"][^>]*>",
                     Pattern.CASE_INSENSITIVE
             );
+    private static final Pattern VIEWPORT_META_PATTERN =
+            Pattern.compile(
+                    "(?is)<meta[^>]+name\\s*=\\s*['\\\"]viewport['\\\"][^>]*>",
+                    Pattern.CASE_INSENSITIVE
+            );
+    private static final int LEGACY_PAGE_MIN_VIEWPORT_WIDTH = 1000;
+    private static final int LEGACY_PAGE_MAX_VIEWPORT_WIDTH = 4096;
     private static final Set<String> HOP_BY_HOP_HEADERS = new HashSet<>(Arrays.asList(
             "connection",
             "keep-alive",
@@ -2391,6 +2422,68 @@ final class BrowserRequestController {
 
         script.append("})();");
         return script.toString();
+    }
+
+    String buildPageCompatScript(boolean legacyViewportMode) {
+        StringBuilder script = new StringBuilder();
+        script.append("(function(){");
+        script.append("var legacyMode=").append(legacyViewportMode ? "true" : "false").append(";");
+        script.append("function preparePage(){");
+        script.append("try{document.documentElement.style.maxWidth='100%';document.documentElement.style.overflowX='auto';document.documentElement.style.overflowY='auto';}catch(e){}");
+        script.append("try{document.documentElement.style.visibility='visible';}catch(e){}");
+        script.append("try{if(document.body){document.body.style.maxWidth='100%';document.body.style.overflowX='auto';document.body.style.overflowY='auto';document.body.style.webkitOverflowScrolling='touch';document.body.style.visibility='visible';document.body.style.opacity='1';}}catch(e){}");
+        script.append("}");
+        script.append("function ensureViewportTag(){");
+        script.append("var meta=document.querySelector('meta[name=\"viewport\"]');");
+        script.append("if(meta){return meta;}");
+        script.append("meta=document.createElement('meta');");
+        script.append("meta.setAttribute('name','viewport');");
+        script.append("var head=document.head||document.getElementsByTagName('head')[0]||document.documentElement;");
+        script.append("if(head.firstChild){head.insertBefore(meta,head.firstChild);}else{head.appendChild(meta);}");
+        script.append("return meta;");
+        script.append("}");
+        script.append("function measureContentWidth(){");
+        script.append("var width=").append(LEGACY_PAGE_MIN_VIEWPORT_WIDTH).append(";");
+        script.append("try{if(window.innerWidth){width=Math.max(width,Math.ceil(window.innerWidth));}}catch(e){}");
+        script.append("try{if(document.documentElement){width=Math.max(width,Math.ceil(document.documentElement.scrollWidth||0));width=Math.max(width,Math.ceil(document.documentElement.getBoundingClientRect().width||0));}}catch(e){}");
+        script.append("try{if(document.body){width=Math.max(width,Math.ceil(document.body.scrollWidth||0));width=Math.max(width,Math.ceil(document.body.getBoundingClientRect().width||0));}}catch(e){}");
+        script.append("try{var nodes=document.querySelectorAll('table,img,object,embed,iframe,canvas,svg,div,section,article,form,body>*');");
+        script.append("var limit=Math.min(nodes.length,200);");
+        script.append("for(var i=0;i<limit;i++){var node=nodes[i];if(!node||!node.getBoundingClientRect){continue;}var rect=node.getBoundingClientRect();if(!rect){continue;}width=Math.max(width,Math.ceil(rect.left+rect.width));}}catch(e){}");
+        script.append("width=Math.max(").append(LEGACY_PAGE_MIN_VIEWPORT_WIDTH).append(",Math.min(").append(LEGACY_PAGE_MAX_VIEWPORT_WIDTH).append(",width));");
+        script.append("return width;");
+        script.append("}");
+        script.append("function applyLegacyViewport(){");
+        script.append("preparePage();");
+        script.append("try{var width=measureContentWidth();var meta=ensureViewportTag();meta.setAttribute('content','width='+width+', initial-scale=1, minimum-scale=0.25, maximum-scale=5, user-scalable=yes');window.__flashBrowserLegacyViewportWidth=width;}catch(e){}");
+        script.append("preparePage();");
+        script.append("}");
+        script.append("window.__flashBrowserRefreshPageCompat=function(){if(legacyMode){applyLegacyViewport();}else{preparePage();}};");
+        script.append("if(!window.__flashBrowserPageCompatBound){");
+        script.append("window.__flashBrowserPageCompatBound=true;");
+        script.append("window.addEventListener('resize',window.__flashBrowserRefreshPageCompat,{passive:true});");
+        script.append("window.addEventListener('orientationchange',window.__flashBrowserRefreshPageCompat,{passive:true});");
+        script.append("document.addEventListener('DOMContentLoaded',window.__flashBrowserRefreshPageCompat,{passive:true});");
+        script.append("window.addEventListener('load',window.__flashBrowserRefreshPageCompat,{passive:true});");
+        script.append("setTimeout(window.__flashBrowserRefreshPageCompat,0);");
+        script.append("setTimeout(window.__flashBrowserRefreshPageCompat,50);");
+        script.append("setTimeout(window.__flashBrowserRefreshPageCompat,250);");
+        script.append("setTimeout(window.__flashBrowserRefreshPageCompat,800);");
+        script.append("}");
+        script.append("if(legacyMode){try{document.documentElement.style.visibility='hidden';if(document.body){document.body.style.visibility='hidden';document.body.style.opacity='0';}}catch(e){}}");
+        script.append("window.__flashBrowserRefreshPageCompat();");
+        script.append("})();");
+        return script.toString();
+    }
+
+    void refreshPageCompatLayout(WebView webView) {
+        if (webView == null) {
+            return;
+        }
+        webView.evaluateJavascript(
+                "(function(){if(window.__flashBrowserRefreshPageCompat){window.__flashBrowserRefreshPageCompat();return true;}return false;})();",
+                value -> { }
+        );
     }
 
     String escapeJsString(String value) {
@@ -2716,25 +2809,50 @@ final class BrowserRequestController {
 
     private String injectBootstrapIntoHtml(String html) {
         String cleanedHtml = CSP_META_PATTERN.matcher(html).replaceAll("");
-        String scriptTag = buildRuffleInjectionTag();
-        if (cleanedHtml.contains(scriptTag)) {
-            return cleanedHtml;
+        boolean likelyFlashPage = containsFlashMarkup(cleanedHtml);
+        String normalizedHtml = cleanedHtml;
+        boolean injectLegacyViewport = !likelyFlashPage;
+        if (injectLegacyViewport) {
+            normalizedHtml = VIEWPORT_META_PATTERN.matcher(normalizedHtml).replaceAll("");
+        }
+        String scriptTag = buildRuffleInjectionTag(injectLegacyViewport);
+        if (normalizedHtml.contains(scriptTag)) {
+            return normalizedHtml;
         }
 
-        if (cleanedHtml.matches("(?is).*?</head>.*")) {
-            return cleanedHtml.replaceFirst("(?is)</head>", Matcher.quoteReplacement(scriptTag + "</head>"));
+        if (normalizedHtml.matches("(?is).*?</head>.*")) {
+            return normalizedHtml.replaceFirst("(?is)</head>", Matcher.quoteReplacement(scriptTag + "</head>"));
         }
 
-        if (cleanedHtml.matches("(?is).*?<html[^>]*>.*")) {
-            return cleanedHtml.replaceFirst("(?is)<html[^>]*>", "$0" + Matcher.quoteReplacement(scriptTag));
+        if (normalizedHtml.matches("(?is).*?<html[^>]*>.*")) {
+            return normalizedHtml.replaceFirst("(?is)<html[^>]*>", "$0" + Matcher.quoteReplacement(scriptTag));
         }
 
-        return scriptTag + cleanedHtml;
+        return scriptTag + normalizedHtml;
     }
 
-    private String buildRuffleInjectionTag() {
-        return "<script>" + buildRuffleConfigScript() + "</script>"
+    private String buildRuffleInjectionTag(boolean injectLegacyViewport) {
+        String viewportTag = "";
+        if (injectLegacyViewport) {
+            viewportTag = "<meta name=\"viewport\" content=\"width=" + LEGACY_PAGE_MIN_VIEWPORT_WIDTH + ", initial-scale=1, minimum-scale=0.25, maximum-scale=5, user-scalable=yes\">"
+                    + "<style>html,body{max-width:100%;overflow-x:auto;overflow-y:auto;-webkit-overflow-scrolling:touch;}</style>";
+        }
+        return viewportTag
+                + "<script>" + buildRuffleConfigScript() + "</script>"
+                + "<script>" + buildPageCompatScript(injectLegacyViewport) + "</script>"
                 + "<script src=\"" + RUFFLE_PATH_PREFIX + BOOTSTRAP_SCRIPT + "\"></script>";
+    }
+
+    private boolean containsFlashMarkup(String html) {
+        if (html == null) {
+            return false;
+        }
+        String lower = html.toLowerCase(Locale.US);
+        return lower.contains(".swf")
+                || lower.contains("shockwave")
+                || lower.contains("ruffle-embed")
+                || lower.contains("ruffle-object")
+                || lower.contains("ruffle-player");
     }
 
     private String getMimeType(HttpURLConnection connection, Uri uri) {
