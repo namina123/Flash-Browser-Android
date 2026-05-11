@@ -9,7 +9,11 @@ import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 final class FeaturePanelCookieController {
@@ -47,15 +51,15 @@ final class FeaturePanelCookieController {
 
         boolean hasStorageAccess = cookieProfileManager.canAccessRootDirectory() && cookieProfileManager.ensureInitialized();
         if (hasStorageAccess) {
-            List<CookieProfileManager.CookieProfile> profiles = cookieProfileManager.loadProfiles();
-            for (CookieProfileManager.CookieProfile profile : profiles) {
+            List<GroupedCookieProfile> profiles = groupProfiles(cookieProfileManager.loadProfiles());
+            for (GroupedCookieProfile profile : profiles) {
                 FeatureCookieChoice choice = new FeatureCookieChoice();
-                choice.label = profile.userName + " (" + profile.file.getName() + ")";
-                choice.pageUrl = CookieProfileManager.buildTargetUrl(profile);
+                choice.label = profile.displayUserNames + " (" + profile.displayFileNames + ")";
+                choice.pageUrl = CookieProfileManager.buildTargetUrl(profile.primaryProfile);
                 choice.subtitle = choice.pageUrl;
-                choice.baseUrl = CookieProfileManager.buildRootUrl(profile);
-                choice.cookies = profile.userCookies;
-                choice.selectionKey = profile.file.getAbsolutePath();
+                choice.baseUrl = CookieProfileManager.buildRootUrl(profile.primaryProfile);
+                choice.cookies = profile.primaryProfile.userCookies;
+                choice.selectionKey = profile.selectionKey;
                 choice.selected = isPersistedCookieChoiceSelected(choice.selectionKey);
                 choice.currentPage = false;
                 choices.add(choice);
@@ -152,5 +156,68 @@ final class FeaturePanelCookieController {
             selectedKeys.remove(choice.selectionKey);
         }
         preferenceStore.setSelectedCookieKeys(selectedKeys);
+    }
+
+    private List<GroupedCookieProfile> groupProfiles(List<CookieProfileManager.CookieProfile> profiles) {
+        LinkedHashMap<String, GroupedCookieProfile> grouped = new LinkedHashMap<>();
+        ArrayList<GroupedCookieProfile> fallbackGroups = new ArrayList<>();
+        int fallbackIndex = 1;
+        for (CookieProfileManager.CookieProfile profile : profiles) {
+            if (profile == null) {
+                continue;
+            }
+            String key = CookieProfileManager.buildCookieIdentityKey(profile.userCookies);
+            if (TextUtils.isEmpty(key)) {
+                fallbackGroups.add(new GroupedCookieProfile("fallback_" + fallbackIndex, profile));
+                fallbackIndex += 1;
+                continue;
+            }
+            GroupedCookieProfile group = grouped.get(key);
+            if (group == null) {
+                group = new GroupedCookieProfile(key, profile);
+                grouped.put(key, group);
+            } else {
+                group.add(profile);
+            }
+        }
+        ArrayList<GroupedCookieProfile> result = new ArrayList<>(grouped.values());
+        result.addAll(fallbackGroups);
+        return result;
+    }
+
+    private static final class GroupedCookieProfile {
+        final String selectionKey;
+        final ArrayList<CookieProfileManager.CookieProfile> profiles = new ArrayList<>();
+        final LinkedHashSet<String> fileNames = new LinkedHashSet<>();
+        final LinkedHashSet<String> userNames = new LinkedHashSet<>();
+        CookieProfileManager.CookieProfile primaryProfile;
+        String displayFileNames;
+        String displayUserNames;
+
+        GroupedCookieProfile(String selectionKey, CookieProfileManager.CookieProfile profile) {
+            this.selectionKey = selectionKey;
+            add(profile);
+        }
+
+        void add(CookieProfileManager.CookieProfile profile) {
+            if (profile == null) {
+                return;
+            }
+            if (primaryProfile == null) {
+                primaryProfile = profile;
+            }
+            profiles.add(profile);
+            if (profile.file != null) {
+                fileNames.add(profile.file.getName());
+            }
+            if (!TextUtils.isEmpty(profile.userName)) {
+                userNames.add(profile.userName);
+            }
+            displayFileNames = TextUtils.join("; ", fileNames);
+            displayUserNames = TextUtils.join("; ", userNames);
+            if (TextUtils.isEmpty(displayUserNames)) {
+                displayUserNames = "cookie_" + System.currentTimeMillis();
+            }
+        }
     }
 }

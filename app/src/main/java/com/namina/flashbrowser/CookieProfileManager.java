@@ -15,10 +15,22 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipException;
+import java.util.zip.ZipInputStream;
 
 final class CookieProfileManager {
     private static final String TAG = "CookieProfileManager";
@@ -26,10 +38,8 @@ final class CookieProfileManager {
     private static final String OUTPUT_DIR_NAME = "PVZOLcookies";
     private static final String TARGET_PATH = "/pvz/index.php/default/main";
     private static final String COOKIE_KEY_PHPSESSID = "PHPSESSID";
-    private static final String COOKIE_KEY_PVZ = "pvz";
     private static final String COOKIE_KEY_PVZOL = "pvzol";
     private static final String COOKIE_KEY_PVZ_YOUKIA_NEW1 = "pvz_youkia_new1";
-    private static final String COOKIE_KEY_YOUKIA = "youkia";
     private static final String[] SAVE_URL_KEYWORDS = new String[] {
             "pvzol",
             "youkia.pvz",
@@ -38,11 +48,18 @@ final class CookieProfileManager {
     private static final String LEGACY_YOUKIA_HOST = "www.youkia.com";
     private static final String LEGACY_YOUKIA_PREFIX = "/pvz/";
     private static final String LEGACY_YOUKIA_INDEX_PREFIX = "/index.php/pvz/";
+    private static final SimpleDateFormat DEFAULT_NAME_FORMAT =
+            new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US);
+    private static final Pattern USER_SETTING_BLOCK_PATTERN =
+            Pattern.compile("(?is)<UserSetting\\b[^>]*>.*?</UserSetting>");
+    private static final int MAX_IMPORT_BYTES = 30 * 1024 * 1024;
 
     private final Context context;
+    private final List<ImportedProfileParser> importedProfileParsers;
 
     CookieProfileManager(Context context) {
         this.context = context.getApplicationContext();
+        this.importedProfileParsers = createImportedProfileParsers();
     }
 
     @SuppressLint("SdCardPath")
@@ -76,7 +93,7 @@ final class CookieProfileManager {
             }
 
             for (String name : names) {
-                if (!name.toLowerCase().endsWith(".xml")) {
+                if (!name.toLowerCase(Locale.US).endsWith(".xml")) {
                     continue;
                 }
 
@@ -106,12 +123,13 @@ final class CookieProfileManager {
             return Collections.emptyList();
         }
 
-        File[] files = getRootDirectory().listFiles((dir, name) -> name.toLowerCase().endsWith(".xml"));
+        File[] files = getRootDirectory().listFiles((dir, name) ->
+                name.toLowerCase(Locale.US).endsWith(".xml"));
         if (files == null || files.length == 0) {
             return Collections.emptyList();
         }
 
-        List<CookieProfile> profiles = new ArrayList<>();
+        ArrayList<CookieProfile> profiles = new ArrayList<>();
         for (File file : files) {
             CookieProfile profile = parseProfile(file);
             if (profile != null) {
@@ -125,35 +143,85 @@ final class CookieProfileManager {
         try (InputStream inputStream = new FileInputStream(file)) {
             XmlPullParser parser = Xml.newPullParser();
             parser.setInput(inputStream, "UTF-8");
-
-            String userName = null;
-            String userDomain = null;
-            String userCookies = null;
-
-            int eventType = parser.getEventType();
-            while (eventType != XmlPullParser.END_DOCUMENT) {
-                if (eventType == XmlPullParser.START_TAG) {
-                    String tag = parser.getName();
-                    if ("UserName".equals(tag)) {
-                        userName = parser.nextText();
-                    } else if ("UserDomain".equals(tag)) {
-                        userDomain = parser.nextText();
-                    } else if ("UserCookies".equals(tag)) {
-                        userCookies = parser.nextText();
-                    }
-                }
-                eventType = parser.next();
-            }
-
-            if (TextUtils.isEmpty(userName) || TextUtils.isEmpty(userDomain) || TextUtils.isEmpty(userCookies)) {
+            ImportedProfile parsed = parseImportedProfile(parser);
+            if (parsed == null) {
                 return null;
             }
-
-            return new CookieProfile(file, userName.trim(), userDomain.trim(), userCookies.trim());
+            return new CookieProfile(
+                    file,
+                    parsed.userId,
+                    parsed.userName,
+                    parsed.userDomain,
+                    parsed.userCookies,
+                    parsed.userLevel
+            );
         } catch (Exception e) {
             Log.e(TAG, "Skipping invalid cookie profile: " + file, e);
             return null;
         }
+    }
+
+    ImportedProfile parseImportedProfileText(String rawText) {
+        if (TextUtils.isEmpty(rawText)) {
+            return null;
+        }
+        String trimmed = rawText.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+
+        for (ImportedProfileParser parser : importedProfileParsers) {
+            try {
+                ImportedProfile parsed = parser.parse(trimmed);
+                if (parsed != null) {
+                    return parsed;
+                }
+            } catch (Exception e) {
+                Log.d(TAG, "Clipboard cookie text did not match parser", e);
+            }
+        }
+        return null;
+    }
+
+    File saveImportedProfile(ImportedProfile profile) {
+        return saveImportedProfile(profile, null, null);
+    }
+
+    File saveImportedProfile(ImportedProfile profile, String fileNameOverride, String userNameOverride) {
+        if (!ensureInitialized() || profile == null) {
+            return null;
+        }
+
+        String userDomain = normalizeRootUrl(profile.userDomain);
+        String normalizedCookies = selectPersistedCookies(profile.userCookies);
+        if (TextUtils.isEmpty(userDomain)
+                || TextUtils.isEmpty(normalizedCookies)
+                || TextUtils.isEmpty(buildCookieIdentityKey(normalizedCookies))) {
+            return null;
+        }
+
+        String userName = sanitizeProfileName(userNameOverride);
+        if (TextUtils.isEmpty(userName)) {
+            userName = sanitizeProfileName(profile.userName);
+        }
+        if (TextUtils.isEmpty(userName)) {
+            userName = buildDefaultProfileName();
+        }
+
+        String fileNameBase = sanitizeProfileName(fileNameOverride);
+        if (TextUtils.isEmpty(fileNameBase)) {
+            fileNameBase = userName;
+        }
+
+        File outputFile = new File(getRootDirectory(), buildUniqueFileName(fileNameBase));
+        return writeProfileFile(
+                outputFile,
+                profile.userId,
+                userDomain,
+                normalizedCookies,
+                userName,
+                profile.userLevel
+        );
     }
 
     static String buildTargetUrl(CookieProfile profile) {
@@ -178,7 +246,7 @@ final class CookieProfileManager {
 
     static boolean isDutyRewardEligibleBaseUrl(String baseUrl) {
         return !TextUtils.isEmpty(baseUrl)
-                && !baseUrl.trim().toLowerCase(java.util.Locale.US).contains("pvzol.org");
+                && !baseUrl.trim().toLowerCase(Locale.US).contains("pvzol.org");
     }
 
     static boolean isSupportedSavePage(Uri uri) {
@@ -225,20 +293,252 @@ final class CookieProfileManager {
             userName = sanitizeProfileName(pageUri.getHost());
         }
         if (TextUtils.isEmpty(userName)) {
-            userName = "PVZOLCookie";
+            userName = buildDefaultProfileName();
         }
 
-        String fileName = buildUniqueFileName(userName);
-        File outputFile = new File(getRootDirectory(), fileName);
-        String xml = buildProfileXml(userDomain, persistedCookies, userName);
+        File outputFile = new File(getRootDirectory(), buildUniqueFileName(userName));
+        return writeProfileFile(outputFile, 1, userDomain, persistedCookies, userName, 1);
+    }
 
-        try (FileOutputStream outputStream = new FileOutputStream(outputFile)) {
-            outputStream.write(xml.getBytes(StandardCharsets.UTF_8));
-            return outputFile;
-        } catch (Exception e) {
-            Log.e(TAG, "Unable to save cookie profile", e);
+    File updateProfilesMetadata(List<CookieProfile> profiles, String fileNameBase, String userName) {
+        if (!ensureInitialized() || profiles == null || profiles.isEmpty()) {
             return null;
         }
+
+        String sanitizedUserName = sanitizeProfileName(userName);
+        if (TextUtils.isEmpty(sanitizedUserName)) {
+            sanitizedUserName = buildDefaultProfileName();
+        }
+
+        String sanitizedFileNameBase = sanitizeProfileName(fileNameBase);
+        if (TextUtils.isEmpty(sanitizedFileNameBase)) {
+            sanitizedFileNameBase = sanitizedUserName;
+        }
+
+        ArrayList<File> targets = new ArrayList<>();
+        Set<String> reservedPaths = new HashSet<>();
+        for (CookieProfile profile : profiles) {
+            if (profile != null && profile.file != null) {
+                reservedPaths.add(profile.file.getAbsolutePath());
+            }
+        }
+
+        for (int index = 0; index < profiles.size(); index++) {
+            targets.add(buildAvailableTargetFile(sanitizedFileNameBase, index, reservedPaths, targets));
+        }
+
+        File firstTarget = null;
+        for (int index = 0; index < profiles.size(); index++) {
+            CookieProfile profile = profiles.get(index);
+            if (profile == null) {
+                continue;
+            }
+            File target = targets.get(index);
+            if (firstTarget == null) {
+                firstTarget = target;
+            }
+            File written = writeProfileFile(
+                    target,
+                    profile.userId,
+                    normalizeRootUrl(profile.userDomain),
+                    selectPersistedCookies(profile.userCookies),
+                    sanitizedUserName,
+                    profile.userLevel
+            );
+            if (written == null) {
+                return null;
+            }
+        }
+
+        Set<String> targetPaths = new HashSet<>();
+        for (File target : targets) {
+            targetPaths.add(target.getAbsolutePath());
+        }
+        for (CookieProfile profile : profiles) {
+            if (profile == null || profile.file == null) {
+                continue;
+            }
+            if (!targetPaths.contains(profile.file.getAbsolutePath())) {
+                //noinspection ResultOfMethodCallIgnored
+                profile.file.delete();
+            }
+        }
+        return firstTarget;
+    }
+
+    boolean deleteProfiles(List<CookieProfile> profiles) {
+        if (profiles == null || profiles.isEmpty()) {
+            return false;
+        }
+        boolean deletedAny = false;
+        for (CookieProfile profile : profiles) {
+            if (profile == null || profile.file == null || !profile.file.exists()) {
+                continue;
+            }
+            if (profile.file.delete()) {
+                deletedAny = true;
+            }
+        }
+        return deletedAny;
+    }
+
+    boolean cleanupDuplicateProfiles(List<CookieProfile> profiles) {
+        if (profiles == null || profiles.size() <= 1) {
+            return false;
+        }
+        boolean deletedAny = false;
+        for (int index = 1; index < profiles.size(); index += 1) {
+            CookieProfile profile = profiles.get(index);
+            if (profile == null || profile.file == null || !profile.file.exists()) {
+                continue;
+            }
+            if (profile.file.delete()) {
+                deletedAny = true;
+            }
+        }
+        return deletedAny;
+    }
+
+    int cleanupAllDuplicateProfiles(List<List<CookieProfile>> groups) {
+        if (groups == null || groups.isEmpty()) {
+            return 0;
+        }
+        int cleanedGroups = 0;
+        for (List<CookieProfile> group : groups) {
+            if (cleanupDuplicateProfiles(group)) {
+                cleanedGroups += 1;
+            }
+        }
+        return cleanedGroups;
+    }
+
+    ImportResult importExternalXml(InputStream inputStream, String fileNameHint) {
+        if (!ensureInitialized() || inputStream == null) {
+            return ImportResult.failure("no_input");
+        }
+        try {
+            byte[] data = readAllBytes(inputStream, MAX_IMPORT_BYTES);
+            String xmlText = new String(data, StandardCharsets.UTF_8);
+            ImportedProfile parsed = parseImportedProfileText(xmlText);
+            if (parsed == null) {
+                return ImportResult.failure("invalid_xml");
+            }
+            File target = new File(getRootDirectory(), buildUniqueFileNameFromHint(fileNameHint, parsed.userName));
+            try (FileOutputStream outputStream = new FileOutputStream(target, false)) {
+                outputStream.write(data);
+            }
+            return ImportResult.success(1, target.getName());
+        } catch (Exception e) {
+            Log.e(TAG, "Unable to import external xml", e);
+            return ImportResult.failure("xml_import_failed");
+        }
+    }
+
+    ImportResult importExternalZip(InputStream inputStream) {
+        if (!ensureInitialized() || inputStream == null) {
+            return ImportResult.failure("no_input");
+        }
+        try {
+            byte[] zipBytes = readAllBytes(inputStream, MAX_IMPORT_BYTES);
+            int importedCount = 0;
+            String firstName = null;
+            try (ZipInputStream zipInputStream = new ZipInputStream(new java.io.ByteArrayInputStream(zipBytes))) {
+                ZipEntry entry;
+                int extractedBytes = 0;
+                while ((entry = zipInputStream.getNextEntry()) != null) {
+                    if (entry.isDirectory()) {
+                        continue;
+                    }
+                    String entryName = entry.getName();
+                    if (TextUtils.isEmpty(entryName) || !entryName.toLowerCase(Locale.US).endsWith(".xml")) {
+                        continue;
+                    }
+                    byte[] entryBytes = readAllBytes(zipInputStream, MAX_IMPORT_BYTES - extractedBytes);
+                    extractedBytes += entryBytes.length;
+                    if (extractedBytes > MAX_IMPORT_BYTES) {
+                        return ImportResult.failure("zip_too_large");
+                    }
+                    String xmlText = new String(entryBytes, StandardCharsets.UTF_8);
+                    ImportedProfile parsed = parseImportedProfileText(xmlText);
+                    if (parsed == null) {
+                        continue;
+                    }
+                    File target = new File(getRootDirectory(), buildUniqueFileNameFromHint(entryName, parsed.userName));
+                    try (FileOutputStream outputStream = new FileOutputStream(target, false)) {
+                        outputStream.write(entryBytes);
+                    }
+                    if (firstName == null) {
+                        firstName = target.getName();
+                    }
+                    importedCount += 1;
+                }
+            } catch (ZipException e) {
+                Log.e(TAG, "Encrypted or invalid zip import", e);
+                return ImportResult.failure("zip_encrypted_or_invalid");
+            }
+            if (importedCount <= 0) {
+                return ImportResult.failure("zip_no_valid_xml");
+            }
+            return ImportResult.success(importedCount, firstName);
+        } catch (Exception e) {
+            Log.e(TAG, "Unable to import external zip", e);
+            return ImportResult.failure("zip_import_failed");
+        }
+    }
+
+    String buildDefaultProfileName() {
+        return "cookie_" + DEFAULT_NAME_FORMAT.format(new Date());
+    }
+
+    static String selectPersistedCookies(String rawCookies) {
+        ImportantCookieInfo info = extractImportantCookies(rawCookies);
+        return info == null ? null : info.persistedCookies;
+    }
+
+    static List<String> buildCookieApplicationList(String rawCookies) {
+        ImportantCookieInfo info = extractImportantCookies(rawCookies);
+        if (info == null || TextUtils.isEmpty(info.persistedCookies)) {
+            return Collections.emptyList();
+        }
+        return splitCookieEntries(info.persistedCookies);
+    }
+
+    static String buildCookieIdentityKey(String rawCookies) {
+        ImportantCookieInfo info = extractImportantCookies(rawCookies);
+        return info == null ? null : info.identityKey;
+    }
+
+    static boolean isLegacyYoukiaLandingPage(Uri uri) {
+        if (uri == null) {
+            return false;
+        }
+        String path = safeLower(uri.getPath());
+        return LEGACY_YOUKIA_HOST.equals(safeLower(uri.getHost()))
+                && (path.startsWith(LEGACY_YOUKIA_PREFIX) || path.startsWith(LEGACY_YOUKIA_INDEX_PREFIX));
+    }
+
+    static String extractLegacyYoukiaSubdomain(Uri uri) {
+        if (!isLegacyYoukiaLandingPage(uri)) {
+            return null;
+        }
+
+        List<String> segments = uri.getPathSegments();
+        String path = safeLower(uri.getPath());
+        int subdomainIndex = path.startsWith(LEGACY_YOUKIA_INDEX_PREFIX) ? 2 : 1;
+        if (segments.size() <= subdomainIndex) {
+            return null;
+        }
+
+        String subdomain = segments.get(subdomainIndex);
+        if (TextUtils.isEmpty(subdomain)) {
+            return null;
+        }
+
+        String normalized = safeLower(subdomain);
+        if ("index.php".equals(normalized) || "default".equals(normalized) || "main".equals(normalized)) {
+            return null;
+        }
+        return subdomain;
     }
 
     private String buildUniqueFileName(String baseName) {
@@ -263,14 +563,95 @@ final class CookieProfileManager {
         }
     }
 
-    private String buildProfileXml(String userDomain, String userCookies, String userName) {
+    private String buildUniqueFileNameFromHint(String fileNameHint, String fallbackBase) {
+        String base = fileNameHint;
+        if (!TextUtils.isEmpty(base)) {
+            int slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));
+            if (slash >= 0 && slash < base.length() - 1) {
+                base = base.substring(slash + 1);
+            }
+            if (base.toLowerCase(Locale.US).endsWith(".xml")) {
+                base = base.substring(0, base.length() - 4);
+            }
+        }
+        if (TextUtils.isEmpty(sanitizeProfileName(base))) {
+            base = fallbackBase;
+        }
+        if (TextUtils.isEmpty(sanitizeProfileName(base))) {
+            base = buildDefaultProfileName();
+        }
+        return buildUniqueFileName(base);
+    }
+
+    private File buildAvailableTargetFile(
+            String baseName,
+            int index,
+            Set<String> reservedPaths,
+            List<File> plannedTargets
+    ) {
+        String safeBase = sanitizeFileName(baseName);
+        if (TextUtils.isEmpty(safeBase)) {
+            safeBase = buildDefaultProfileName();
+        }
+        File outputDir = getRootDirectory();
+        int suffix = index + 1;
+        while (true) {
+            String candidateName = suffix == 1 ? safeBase + ".xml" : safeBase + "_" + suffix + ".xml";
+            File candidate = new File(outputDir, candidateName);
+            boolean usedByPlan = false;
+            for (File plannedTarget : plannedTargets) {
+                if (plannedTarget != null
+                        && candidate.getAbsolutePath().equals(plannedTarget.getAbsolutePath())) {
+                    usedByPlan = true;
+                    break;
+                }
+            }
+            if (!usedByPlan
+                    && (!candidate.exists() || reservedPaths.contains(candidate.getAbsolutePath()))) {
+                return candidate;
+            }
+            suffix += 1;
+        }
+    }
+
+    private File writeProfileFile(
+            File outputFile,
+            int userId,
+            String userDomain,
+            String userCookies,
+            String userName,
+            int userLevel
+    ) {
+        if (outputFile == null
+                || TextUtils.isEmpty(userDomain)
+                || TextUtils.isEmpty(userCookies)
+                || TextUtils.isEmpty(userName)) {
+            return null;
+        }
+        String xml = buildProfileXml(userId, userDomain, userCookies, userName, userLevel);
+        try (FileOutputStream outputStream = new FileOutputStream(outputFile, false)) {
+            outputStream.write(xml.getBytes(StandardCharsets.UTF_8));
+            return outputFile;
+        } catch (Exception e) {
+            Log.e(TAG, "Unable to write cookie profile", e);
+            return null;
+        }
+    }
+
+    private String buildProfileXml(
+            int userId,
+            String userDomain,
+            String userCookies,
+            String userName,
+            int userLevel
+    ) {
         return "<?xml version=\"1.0\" ?>\n"
                 + "<UserSetting>\n"
-                + "  <UserID>1</UserID>\n"
+                + "  <UserID>" + userId + "</UserID>\n"
                 + "  <UserDomain>" + escapeXml(userDomain) + "</UserDomain>\n"
                 + "  <UserCookies>" + escapeXml(userCookies) + "</UserCookies>\n"
                 + "  <UserName>" + escapeXml(userName) + "</UserName>\n"
-                + "  <UserLevel>1</UserLevel>\n"
+                + "  <UserLevel>" + userLevel + "</UserLevel>\n"
                 + "</UserSetting>\n";
     }
 
@@ -325,73 +706,19 @@ final class CookieProfileManager {
                 .replaceAll("/$", "");
     }
 
-    static boolean isLegacyYoukiaLandingPage(Uri uri) {
-        if (uri == null) {
-            return false;
-        }
-        String path = safeLower(uri.getPath());
-        return LEGACY_YOUKIA_HOST.equals(safeLower(uri.getHost()))
-                && (path.startsWith(LEGACY_YOUKIA_PREFIX) || path.startsWith(LEGACY_YOUKIA_INDEX_PREFIX));
-    }
-
-    static String extractLegacyYoukiaSubdomain(Uri uri) {
-        if (!isLegacyYoukiaLandingPage(uri)) {
-            return null;
-        }
-
-        List<String> segments = uri.getPathSegments();
-        String path = safeLower(uri.getPath());
-        int subdomainIndex = path.startsWith(LEGACY_YOUKIA_INDEX_PREFIX) ? 2 : 1;
-        if (segments.size() <= subdomainIndex) {
-            return null;
-        }
-
-        String subdomain = segments.get(subdomainIndex);
-        if (TextUtils.isEmpty(subdomain)) {
-            return null;
-        }
-
-        String normalized = safeLower(subdomain);
-        if ("index.php".equals(normalized) || "default".equals(normalized) || "main".equals(normalized)) {
-            return null;
-        }
-        return subdomain;
-    }
-
     private static String safeLower(String value) {
-        return value == null ? "" : value.trim().toLowerCase(java.util.Locale.US);
+        return value == null ? "" : value.trim().toLowerCase(Locale.US);
     }
 
-    static String selectPersistedCookies(String rawCookies) {
-        String effectiveCookies = extractEffectiveCookies(rawCookies);
-        if (!TextUtils.isEmpty(effectiveCookies)) {
-            return effectiveCookies;
-        }
-        if (TextUtils.isEmpty(rawCookies)) {
-            return null;
-        }
-        return rawCookies.trim();
-    }
-
-    static List<String> buildCookieApplicationList(String rawCookies) {
-        String effectiveCookies = extractEffectiveCookies(rawCookies);
-        if (!TextUtils.isEmpty(effectiveCookies)) {
-            return splitCookieEntries(effectiveCookies);
-        }
-        return splitCookieEntries(rawCookies);
-    }
-
-    private static String extractEffectiveCookies(String rawCookies) {
+    private static ImportantCookieInfo extractImportantCookies(String rawCookies) {
         List<String> entries = splitCookieEntries(rawCookies);
         if (entries.isEmpty()) {
             return null;
         }
 
-        ArrayList<String> selectedEntries = new ArrayList<>(5);
-        int phpSessionCount = 0;
-        boolean hasPvz = false;
-        boolean hasPvzYoukiaNew1 = false;
-        boolean hasYoukia = false;
+        ArrayList<String> phpSessions = new ArrayList<>();
+        ArrayList<String> pvzYoukiaEntries = new ArrayList<>();
+        String pvzolEntry = null;
 
         for (String entry : entries) {
             String key = getCookieKey(entry);
@@ -400,42 +727,50 @@ final class CookieProfileManager {
             }
 
             if (COOKIE_KEY_PHPSESSID.equalsIgnoreCase(key)) {
-                if (phpSessionCount < 2) {
-                    selectedEntries.add(entry);
-                }
-                phpSessionCount += 1;
+                addUniqueCookieEntry(phpSessions, entry);
                 continue;
             }
-
-            if (!hasPvz && COOKIE_KEY_PVZ.equalsIgnoreCase(key)) {
-                selectedEntries.add(entry);
-                hasPvz = true;
+            if (COOKIE_KEY_PVZ_YOUKIA_NEW1.equalsIgnoreCase(key)) {
+                addUniqueCookieEntry(pvzYoukiaEntries, entry);
                 continue;
             }
-
-            if (!hasPvzYoukiaNew1 && COOKIE_KEY_PVZ_YOUKIA_NEW1.equalsIgnoreCase(key)) {
-                selectedEntries.add(entry);
-                hasPvzYoukiaNew1 = true;
-                continue;
-            }
-
-            if (!hasYoukia && COOKIE_KEY_YOUKIA.equalsIgnoreCase(key)) {
-                selectedEntries.add(entry);
-                hasYoukia = true;
+            if (pvzolEntry == null && COOKIE_KEY_PVZOL.equalsIgnoreCase(key)) {
+                pvzolEntry = entry;
             }
         }
 
-        if (phpSessionCount >= 2 && hasPvz && hasPvzYoukiaNew1 && hasYoukia && selectedEntries.size() == 5) {
-            return TextUtils.join("; ", selectedEntries);
+        if (!phpSessions.isEmpty() && !pvzYoukiaEntries.isEmpty()) {
+            ArrayList<String> persistedEntries = new ArrayList<>(phpSessions.size() + pvzYoukiaEntries.size());
+            persistedEntries.addAll(phpSessions);
+            persistedEntries.addAll(pvzYoukiaEntries);
+
+            ArrayList<String> identityEntries = new ArrayList<>(persistedEntries);
+            Collections.sort(identityEntries, String.CASE_INSENSITIVE_ORDER);
+            return new ImportantCookieInfo(
+                    TextUtils.join("; ", persistedEntries),
+                    TextUtils.join("||", identityEntries),
+                    true,
+                    pvzolEntry != null
+            );
         }
 
-        for (String entry : entries) {
-            String key = getCookieKey(entry);
-            if (COOKIE_KEY_PVZOL.equalsIgnoreCase(key)) {
-                return entry;
-            }
+        if (pvzolEntry != null) {
+            return new ImportantCookieInfo(pvzolEntry, pvzolEntry, false, true);
         }
+
         return null;
+    }
+
+    private static void addUniqueCookieEntry(List<String> target, String entry) {
+        String key = safeLower(getCookieKey(entry));
+        String value = safeLower(getCookieValue(entry));
+        for (String existing : target) {
+            if (key.equals(safeLower(getCookieKey(existing)))
+                    && value.equals(safeLower(getCookieValue(existing)))) {
+                return;
+            }
+        }
+        target.add(entry);
     }
 
     private static List<String> splitCookieEntries(String rawCookies) {
@@ -469,6 +804,170 @@ final class CookieProfileManager {
         return cookieEntry.substring(0, index).trim();
     }
 
+    private static String getCookieValue(String cookieEntry) {
+        if (TextUtils.isEmpty(cookieEntry)) {
+            return null;
+        }
+        int index = cookieEntry.indexOf('=');
+        if (index < 0 || index >= cookieEntry.length() - 1) {
+            return "";
+        }
+        return cookieEntry.substring(index + 1).trim();
+    }
+
+    private List<ImportedProfileParser> createImportedProfileParsers() {
+        ArrayList<ImportedProfileParser> parsers = new ArrayList<>();
+        parsers.add(this::parseImportedXmlText);
+        return Collections.unmodifiableList(parsers);
+    }
+
+    private ImportedProfile parseImportedXmlText(String rawText) throws Exception {
+        if (TextUtils.isEmpty(rawText)) {
+            return null;
+        }
+
+        List<String> blocks = extractUserSettingBlocks(rawText);
+        if (blocks.isEmpty() && rawText.trim().startsWith("<")) {
+            blocks = Collections.singletonList(rawText);
+        }
+        if (blocks.isEmpty()) {
+            return null;
+        }
+
+        LinkedHashMap<String, MergedImportedProfile> mergedByDomain = new LinkedHashMap<>();
+        for (String block : blocks) {
+            ParsedProfileFields fields = parseProfileFields(block);
+            if (fields == null || TextUtils.isEmpty(fields.userDomain) || TextUtils.isEmpty(fields.userCookies)) {
+                continue;
+            }
+
+            String normalizedDomain = normalizeRootUrl(fields.userDomain);
+            ImportantCookieInfo cookieInfo = extractImportantCookies(fields.userCookies);
+            if (TextUtils.isEmpty(normalizedDomain) || cookieInfo == null) {
+                continue;
+            }
+
+            MergedImportedProfile merged = mergedByDomain.get(normalizedDomain);
+            if (merged == null) {
+                merged = new MergedImportedProfile(normalizedDomain);
+                mergedByDomain.put(normalizedDomain, merged);
+            }
+            merged.absorb(fields, cookieInfo);
+        }
+
+        ImportedProfile bestProfile = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (MergedImportedProfile merged : mergedByDomain.values()) {
+            ImportedProfile candidate = merged.toImportedProfile();
+            if (candidate == null) {
+                continue;
+            }
+            int score = merged.score();
+            if (bestProfile == null || score > bestScore) {
+                bestProfile = candidate;
+                bestScore = score;
+            }
+        }
+        return bestProfile;
+    }
+
+    private ImportedProfile parseImportedProfile(XmlPullParser parser) throws Exception {
+        ParsedProfileFields fields = parseProfileFields(parser);
+        if (fields == null || TextUtils.isEmpty(fields.userDomain) || TextUtils.isEmpty(fields.userCookies)) {
+            return null;
+        }
+
+        String normalizedCookies = selectPersistedCookies(fields.userCookies);
+        if (TextUtils.isEmpty(normalizedCookies) || TextUtils.isEmpty(buildCookieIdentityKey(normalizedCookies))) {
+            return null;
+        }
+
+        return new ImportedProfile(
+                fields.userId,
+                sanitizeProfileName(fields.userName),
+                fields.userDomain.trim(),
+                normalizedCookies.trim(),
+                Math.max(1, fields.userLevel),
+                "xml"
+        );
+    }
+
+    private ParsedProfileFields parseProfileFields(String xmlText) throws Exception {
+        XmlPullParser parser = Xml.newPullParser();
+        parser.setInput(new StringReader(xmlText));
+        return parseProfileFields(parser);
+    }
+
+    private ParsedProfileFields parseProfileFields(XmlPullParser parser) throws Exception {
+        String userName = null;
+        String userDomain = null;
+        String userCookies = null;
+        int userId = 1;
+        int userLevel = 1;
+
+        int eventType = parser.getEventType();
+        while (eventType != XmlPullParser.END_DOCUMENT) {
+            if (eventType == XmlPullParser.START_TAG) {
+                String tag = parser.getName();
+                if ("UserID".equals(tag)) {
+                    userId = parseIntegerSafely(parser.nextText(), 1);
+                } else if ("UserName".equals(tag)) {
+                    userName = parser.nextText();
+                } else if ("UserDomain".equals(tag)) {
+                    userDomain = parser.nextText();
+                } else if ("UserCookies".equals(tag)) {
+                    userCookies = parser.nextText();
+                } else if ("UserLevel".equals(tag)) {
+                    userLevel = parseIntegerSafely(parser.nextText(), 1);
+                }
+            }
+            eventType = parser.next();
+        }
+
+        if (TextUtils.isEmpty(userDomain) || TextUtils.isEmpty(userCookies)) {
+            return null;
+        }
+        return new ParsedProfileFields(userId, userName, userDomain, userCookies, userLevel);
+    }
+
+    private List<String> extractUserSettingBlocks(String rawText) {
+        ArrayList<String> blocks = new ArrayList<>();
+        Matcher matcher = USER_SETTING_BLOCK_PATTERN.matcher(rawText);
+        while (matcher.find()) {
+            String block = matcher.group();
+            if (!TextUtils.isEmpty(block)) {
+                blocks.add(block);
+            }
+        }
+        return blocks;
+    }
+
+    private int parseIntegerSafely(String value, int fallback) {
+        if (TextUtils.isEmpty(value)) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private byte[] readAllBytes(InputStream inputStream, int maxBytes) throws java.io.IOException {
+        byte[] buffer = new byte[8192];
+        int total = 0;
+        java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
+        int count;
+        while ((count = inputStream.read(buffer)) != -1) {
+            total += count;
+            if (total > maxBytes) {
+                throw new java.io.IOException("Input exceeds size limit");
+            }
+            outputStream.write(buffer, 0, count);
+        }
+        return outputStream.toByteArray();
+    }
+
     private String escapeXml(String value) {
         return value
                 .replace("&", "&amp;")
@@ -480,15 +979,192 @@ final class CookieProfileManager {
 
     static final class CookieProfile {
         final File file;
+        final int userId;
         final String userName;
         final String userDomain;
         final String userCookies;
+        final int userLevel;
 
-        CookieProfile(File file, String userName, String userDomain, String userCookies) {
+        CookieProfile(File file, int userId, String userName, String userDomain, String userCookies, int userLevel) {
             this.file = file;
+            this.userId = userId;
             this.userName = userName;
             this.userDomain = userDomain;
             this.userCookies = userCookies;
+            this.userLevel = userLevel;
+        }
+    }
+
+    interface ImportedProfileParser {
+        ImportedProfile parse(String rawText) throws Exception;
+    }
+
+    static final class ImportedProfile {
+        final int userId;
+        final String userName;
+        final String userDomain;
+        final String userCookies;
+        final int userLevel;
+        final String sourceFormat;
+
+        ImportedProfile(
+                int userId,
+                String userName,
+                String userDomain,
+                String userCookies,
+                int userLevel,
+                String sourceFormat
+        ) {
+            this.userId = userId;
+            this.userName = userName;
+            this.userDomain = userDomain;
+            this.userCookies = userCookies;
+            this.userLevel = userLevel;
+            this.sourceFormat = sourceFormat;
+        }
+    }
+
+    static final class ImportResult {
+        final boolean success;
+        final int importedCount;
+        final String primaryName;
+        final String errorCode;
+
+        private ImportResult(boolean success, int importedCount, String primaryName, String errorCode) {
+            this.success = success;
+            this.importedCount = importedCount;
+            this.primaryName = primaryName;
+            this.errorCode = errorCode;
+        }
+
+        static ImportResult success(int importedCount, String primaryName) {
+            return new ImportResult(true, importedCount, primaryName, null);
+        }
+
+        static ImportResult failure(String errorCode) {
+            return new ImportResult(false, 0, null, errorCode);
+        }
+    }
+
+    private static final class ImportantCookieInfo {
+        final String persistedCookies;
+        final String identityKey;
+        final boolean hasStrongCookieSet;
+        final boolean hasPvzol;
+
+        ImportantCookieInfo(
+                String persistedCookies,
+                String identityKey,
+                boolean hasStrongCookieSet,
+                boolean hasPvzol
+        ) {
+            this.persistedCookies = persistedCookies;
+            this.identityKey = identityKey;
+            this.hasStrongCookieSet = hasStrongCookieSet;
+            this.hasPvzol = hasPvzol;
+        }
+    }
+
+    private static final class ParsedProfileFields {
+        final int userId;
+        final String userName;
+        final String userDomain;
+        final String userCookies;
+        final int userLevel;
+
+        ParsedProfileFields(int userId, String userName, String userDomain, String userCookies, int userLevel) {
+            this.userId = userId;
+            this.userName = userName;
+            this.userDomain = userDomain;
+            this.userCookies = userCookies;
+            this.userLevel = userLevel;
+        }
+    }
+
+    private final class MergedImportedProfile {
+        final String userDomain;
+        final ArrayList<String> phpSessions = new ArrayList<>();
+        final ArrayList<String> pvzYoukiaEntries = new ArrayList<>();
+        String pvzolEntry;
+        String userName;
+        int userId = 1;
+        int userLevel = 1;
+
+        MergedImportedProfile(String userDomain) {
+            this.userDomain = userDomain;
+        }
+
+        void absorb(ParsedProfileFields fields, ImportantCookieInfo cookieInfo) {
+            if (TextUtils.isEmpty(userName) && !TextUtils.isEmpty(fields.userName)) {
+                userName = sanitizeProfileName(fields.userName);
+            }
+            if (fields.userId > 0) {
+                userId = fields.userId;
+            }
+            if (fields.userLevel > 0) {
+                userLevel = fields.userLevel;
+            }
+
+            for (String entry : splitCookieEntries(fields.userCookies)) {
+                String key = getCookieKey(entry);
+                if (TextUtils.isEmpty(key)) {
+                    continue;
+                }
+                if (COOKIE_KEY_PHPSESSID.equalsIgnoreCase(key)) {
+                    addUniqueCookieEntry(phpSessions, entry);
+                } else if (COOKIE_KEY_PVZ_YOUKIA_NEW1.equalsIgnoreCase(key)) {
+                    addUniqueCookieEntry(pvzYoukiaEntries, entry);
+                } else if (COOKIE_KEY_PVZOL.equalsIgnoreCase(key) && TextUtils.isEmpty(pvzolEntry)) {
+                    pvzolEntry = entry;
+                }
+            }
+            if (!cookieInfo.hasStrongCookieSet && TextUtils.isEmpty(pvzolEntry) && cookieInfo.hasPvzol) {
+                pvzolEntry = cookieInfo.persistedCookies;
+            }
+        }
+
+        ImportedProfile toImportedProfile() {
+            String cookies = buildMergedCookieText();
+            if (TextUtils.isEmpty(cookies)) {
+                return null;
+            }
+            return new ImportedProfile(
+                    Math.max(1, userId),
+                    sanitizeProfileName(userName),
+                    userDomain,
+                    cookies,
+                    Math.max(1, userLevel),
+                    "xml"
+            );
+        }
+
+        int score() {
+            int score = 0;
+            if (!phpSessions.isEmpty() && !pvzYoukiaEntries.isEmpty()) {
+                score += 1000;
+            }
+            score += phpSessions.size() * 10;
+            score += pvzYoukiaEntries.size() * 20;
+            if (!TextUtils.isEmpty(userName)) {
+                score += 5;
+            }
+            if (!TextUtils.isEmpty(pvzolEntry)) {
+                score += 1;
+            }
+            return score;
+        }
+
+        private String buildMergedCookieText() {
+            if (!phpSessions.isEmpty() && !pvzYoukiaEntries.isEmpty()) {
+                ArrayList<String> merged = new ArrayList<>(phpSessions.size() + pvzYoukiaEntries.size());
+                merged.addAll(phpSessions);
+                merged.addAll(pvzYoukiaEntries);
+                return TextUtils.join("; ", merged);
+            }
+            if (!TextUtils.isEmpty(pvzolEntry)) {
+                return pvzolEntry;
+            }
+            return null;
         }
     }
 }

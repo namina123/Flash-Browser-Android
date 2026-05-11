@@ -10,6 +10,8 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
 import android.content.Intent;
+import android.content.ClipboardManager;
+import android.database.Cursor;
 import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.net.Uri;
@@ -19,6 +21,7 @@ import android.os.Bundle;
 import android.os.FileObserver;
 import android.os.Message;
 import android.os.SystemClock;
+import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
@@ -117,6 +120,7 @@ public class MainActivity extends AppCompatActivity {
     private BrowserPreferenceStore preferenceStore;
     private LocalMappingManager localMappingManager;
     private CookieProfileManager cookieProfileManager;
+    private ClipboardCookieImportController clipboardCookieImportController;
     private BrowserSettingsController browserSettingsController;
     private BrowserRequestController browserRequestController;
     private BrowserFullscreenController browserFullscreenController;
@@ -124,6 +128,10 @@ public class MainActivity extends AppCompatActivity {
     private BrowserTouchController browserTouchController;
     private FeaturePanelDialogController featurePanelDialogController;
     private final DutyRequestQueue dutyRequestQueue = new DutyRequestQueue();
+    private Uri pendingExternalCookieImportUri;
+    private String pendingExternalCookieImportName;
+    private String pendingExternalCookieImportMimeType;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
@@ -142,6 +150,11 @@ public class MainActivity extends AppCompatActivity {
         localMappingManager = new LocalMappingManager(this);
         localMappingManager.initialize();
         cookieProfileManager = new CookieProfileManager(this);
+        clipboardCookieImportController = new ClipboardCookieImportController(
+                this,
+                cookieProfileManager,
+                this::requestAllFilesAccessPermission
+        );
         browserRequestController = new BrowserRequestController(
                 this,
                 localMappingManager,
@@ -277,12 +290,32 @@ public class MainActivity extends AppCompatActivity {
             browserNavigationController.loadUrl(DEFAULT_URL);
         }
         wrapper.setOnTouchListener((v, event) -> browserTouchController.handleTouch(event));
+        handleIncomingIntent(getIntent());
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         featurePanelDialogController.onResume();
+        resumePendingExternalCookieImportIfPossible();
+        if (clipboardCookieImportController != null) {
+            clipboardCookieImportController.onResume();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIncomingIntent(intent);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (clipboardCookieImportController != null) {
+            clipboardCookieImportController.onWindowFocusChanged(hasFocus);
+        }
     }
 
     @Override
@@ -779,6 +812,142 @@ public class MainActivity extends AppCompatActivity {
             startActivity(intent);
         }
         Toast.makeText(this, R.string.cookie_storage_permission_granted_tip, Toast.LENGTH_LONG).show();
+    }
+
+    private void handleIncomingIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+
+        Uri targetUri = null;
+        String mimeType = intent.getType();
+        String fileNameHint = null;
+        String action = intent.getAction();
+        if (Intent.ACTION_VIEW.equals(action)) {
+            targetUri = intent.getData();
+        } else if (Intent.ACTION_SEND.equals(action)) {
+            Object stream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (stream instanceof Uri) {
+                targetUri = (Uri) stream;
+            }
+        }
+
+        if (targetUri == null) {
+            return;
+        }
+
+        fileNameHint = getDisplayNameForUri(targetUri);
+        if (TextUtils.isEmpty(fileNameHint)) {
+            fileNameHint = targetUri.getLastPathSegment();
+        }
+
+        if (!isSupportedCookieImport(mimeType, fileNameHint)) {
+            return;
+        }
+
+        if (!cookieProfileManager.canAccessRootDirectory()) {
+            pendingExternalCookieImportUri = targetUri;
+            pendingExternalCookieImportName = fileNameHint;
+            pendingExternalCookieImportMimeType = mimeType;
+            Toast.makeText(this, R.string.cookie_import_need_permission, Toast.LENGTH_LONG).show();
+            requestAllFilesAccessPermission();
+            return;
+        }
+
+        importExternalCookieUri(targetUri, mimeType, fileNameHint);
+    }
+
+    private void resumePendingExternalCookieImportIfPossible() {
+        if (pendingExternalCookieImportUri == null || !cookieProfileManager.canAccessRootDirectory()) {
+            return;
+        }
+        importExternalCookieUri(
+                pendingExternalCookieImportUri,
+                pendingExternalCookieImportMimeType,
+                pendingExternalCookieImportName
+        );
+    }
+
+    private void importExternalCookieUri(Uri uri, String mimeType, String fileNameHint) {
+        if (uri == null) {
+            return;
+        }
+
+        CookieProfileManager.ImportResult result;
+        try (InputStream inputStream = getContentResolver().openInputStream(uri)) {
+            if (inputStream == null) {
+                result = CookieProfileManager.ImportResult.failure("no_input");
+            } else if (isZipImport(mimeType, fileNameHint)) {
+                result = cookieProfileManager.importExternalZip(inputStream);
+            } else if (isXmlImport(mimeType, fileNameHint)) {
+                result = cookieProfileManager.importExternalXml(inputStream, fileNameHint);
+            } else {
+                return;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Unable to import external cookie file", e);
+            result = CookieProfileManager.ImportResult.failure("import_exception");
+        }
+
+        pendingExternalCookieImportUri = null;
+        pendingExternalCookieImportName = null;
+        pendingExternalCookieImportMimeType = null;
+
+        if (result.success) {
+            if (result.importedCount <= 1 && !TextUtils.isEmpty(result.primaryName)) {
+                Toast.makeText(
+                        this,
+                        getString(R.string.cookie_import_success_single, result.primaryName),
+                        Toast.LENGTH_LONG
+                ).show();
+            } else {
+                Toast.makeText(
+                        this,
+                        getString(R.string.cookie_import_success_multiple, result.importedCount),
+                        Toast.LENGTH_LONG
+                ).show();
+            }
+            return;
+        }
+
+        Toast.makeText(this, R.string.cookie_import_failed, Toast.LENGTH_LONG).show();
+    }
+
+    private String getDisplayNameForUri(Uri uri) {
+        if (uri == null) {
+            return null;
+        }
+        if ("content".equalsIgnoreCase(uri.getScheme())) {
+            try (Cursor cursor = getContentResolver().query(uri, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int columnIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (columnIndex >= 0) {
+                        return cursor.getString(columnIndex);
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Unable to resolve display name for import uri: " + uri, e);
+            }
+        }
+        return null;
+    }
+
+    private boolean isSupportedCookieImport(String mimeType, String fileNameHint) {
+        return isXmlImport(mimeType, fileNameHint) || isZipImport(mimeType, fileNameHint);
+    }
+
+    private boolean isXmlImport(String mimeType, String fileNameHint) {
+        String normalizedMime = mimeType == null ? "" : mimeType.toLowerCase(Locale.US);
+        String normalizedName = fileNameHint == null ? "" : fileNameHint.toLowerCase(Locale.US);
+        return normalizedMime.contains("xml")
+                || normalizedName.endsWith(".xml");
+    }
+
+    private boolean isZipImport(String mimeType, String fileNameHint) {
+        String normalizedMime = mimeType == null ? "" : mimeType.toLowerCase(Locale.US);
+        String normalizedName = fileNameHint == null ? "" : fileNameHint.toLowerCase(Locale.US);
+        return normalizedMime.contains("zip")
+                || normalizedName.endsWith(".zip");
     }
 
     private void applySavedOrientation() {
@@ -3877,21 +4046,44 @@ final class BrowserSettingsController {
             return;
         }
 
-        List<CookieProfileManager.CookieProfile> profiles = cookieProfileManager.loadProfiles();
-        if (profiles.isEmpty()) {
+        List<CookieProfileGroup> groups = buildCookieProfileGroups(cookieProfileManager.loadProfiles());
+        if (groups.isEmpty()) {
             Toast.makeText(activity, R.string.cookie_no_profiles, Toast.LENGTH_LONG).show();
             return;
         }
 
         View dialogView = LayoutInflater.from(activity).inflate(R.layout.dialog_cookie_profiles, null);
         LinearLayout container = dialogView.findViewById(R.id.cookie_profile_container);
+        Button cleanupAllButton = dialogView.findViewById(R.id.btn_cleanup_all_cookie_duplicates);
         AlertDialog dialog = new AlertDialog.Builder(activity)
                 .setTitle(R.string.cookie_profile_title)
                 .setView(dialogView)
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
 
-        renderCookieProfiles(container, profiles, dialog);
+        Runnable refreshProfiles = () -> renderCookieProfiles(
+                container,
+                buildCookieProfileGroups(cookieProfileManager.loadProfiles()),
+                dialog
+        );
+        cleanupAllButton.setOnClickListener(v -> {
+            List<CookieProfileGroup> currentGroups = buildCookieProfileGroups(cookieProfileManager.loadProfiles());
+            ArrayList<List<CookieProfileManager.CookieProfile>> duplicateGroups = new ArrayList<>();
+            for (CookieProfileGroup group : currentGroups) {
+                if (group != null && group.profiles.size() > 1) {
+                    duplicateGroups.add(group.profiles);
+                }
+            }
+            int cleanedGroups = cookieProfileManager.cleanupAllDuplicateProfiles(duplicateGroups);
+            Toast.makeText(
+                    activity,
+                    cleanedGroups > 0 ? R.string.cookie_cleanup_all_done : R.string.cookie_cleanup_none,
+                    Toast.LENGTH_SHORT
+            ).show();
+            refreshProfiles.run();
+        });
+
+        refreshProfiles.run();
 
         File cookieDir = cookieProfileManager.getRootDirectory();
         FileObserver observer = new FileObserver(cookieDir.getAbsolutePath(),
@@ -3906,7 +4098,11 @@ final class BrowserSettingsController {
                     if (!dialog.isShowing()) {
                         return;
                     }
-                    renderCookieProfiles(container, cookieProfileManager.loadProfiles(), dialog);
+                    renderCookieProfiles(
+                            container,
+                            buildCookieProfileGroups(cookieProfileManager.loadProfiles()),
+                            dialog
+                    );
                 });
             }
         };
@@ -3917,11 +4113,11 @@ final class BrowserSettingsController {
 
     private void renderCookieProfiles(
             LinearLayout container,
-            List<CookieProfileManager.CookieProfile> profiles,
+            List<CookieProfileGroup> groups,
             AlertDialog dialog
     ) {
         container.removeAllViews();
-        if (profiles.isEmpty()) {
+        if (groups.isEmpty()) {
             TextView emptyView = new TextView(activity);
             emptyView.setText(R.string.cookie_no_profiles);
             emptyView.setTextColor(0xFF374151);
@@ -3930,24 +4126,205 @@ final class BrowserSettingsController {
             return;
         }
 
-        for (CookieProfileManager.CookieProfile profile : profiles) {
+        for (CookieProfileGroup group : groups) {
             View itemView = LayoutInflater.from(activity).inflate(R.layout.item_cookie_profile, container, false);
             TextView fileName = itemView.findViewById(R.id.text_file_name);
             TextView userName = itemView.findViewById(R.id.text_user_name);
-            fileName.setText(activity.getString(R.string.cookie_file_name, profile.file.getName()));
-            userName.setText(activity.getString(R.string.cookie_user_name, profile.userName));
+            View cleanupButton = itemView.findViewById(R.id.btn_cleanup_cookie_duplicates);
+            fileName.setText(activity.getString(R.string.cookie_file_name, group.displayFileNames));
+            userName.setText(activity.getString(R.string.cookie_user_name, group.displayUserNames));
+            itemView.findViewById(R.id.btn_edit_cookie).setOnClickListener(v ->
+                    showEditCookieProfileDialog(group, () ->
+                            renderCookieProfiles(
+                                    container,
+                                    buildCookieProfileGroups(cookieProfileManager.loadProfiles()),
+                                    dialog
+                            )
+                    )
+            );
+            cleanupButton.setEnabled(group.profiles.size() > 1);
+            cleanupButton.setAlpha(group.profiles.size() > 1 ? 1f : 0.45f);
+            cleanupButton.setOnClickListener(v -> {
+                boolean cleaned = cookieProfileManager.cleanupDuplicateProfiles(group.profiles);
+                Toast.makeText(
+                        activity,
+                        cleaned ? R.string.cookie_cleanup_done : R.string.cookie_cleanup_none,
+                        Toast.LENGTH_SHORT
+                ).show();
+                renderCookieProfiles(
+                        container,
+                        buildCookieProfileGroups(cookieProfileManager.loadProfiles()),
+                        dialog
+                );
+            });
+            itemView.findViewById(R.id.btn_delete_cookie).setOnClickListener(v ->
+                    showDeleteCookieConfirmationDialog(group, () ->
+                            renderCookieProfiles(
+                                    container,
+                                    buildCookieProfileGroups(cookieProfileManager.loadProfiles()),
+                                    dialog
+                            )
+                    )
+            );
             itemView.findViewById(R.id.btn_apply_cookie).setOnClickListener(v -> {
                 dialog.dismiss();
-                applyCookieProfile(profile);
+                applyCookieProfile(group.primaryProfile);
             });
             container.addView(itemView);
         }
     }
 
+    private void showDeleteCookieConfirmationDialog(CookieProfileGroup group, Runnable onDeleted) {
+        if (group == null || group.profiles.isEmpty()) {
+            return;
+        }
+
+        float density = activity.getResources().getDisplayMetrics().density;
+        int horizontalPadding = Math.round(20f * density);
+        int verticalPadding = Math.round(12f * density);
+
+        LinearLayout layout = new LinearLayout(activity);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding);
+
+        TextView messageView = new TextView(activity);
+        messageView.setText(R.string.cookie_delete_message);
+        messageView.setTextColor(0xFF374151);
+        layout.addView(messageView);
+
+        EditText confirmEdit = new EditText(activity);
+        confirmEdit.setHint(R.string.cookie_delete_confirm_hint);
+        confirmEdit.setSingleLine(true);
+        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        inputParams.topMargin = Math.round(12f * density);
+        confirmEdit.setLayoutParams(inputParams);
+        layout.addView(confirmEdit);
+
+        AlertDialog confirmDialog = new AlertDialog.Builder(activity)
+                .setTitle(R.string.cookie_delete_title)
+                .setView(layout)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.cookie_delete, null)
+                .create();
+        confirmDialog.setOnShowListener(dialogInterface -> {
+            Button positiveButton = confirmDialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            positiveButton.setOnClickListener(v -> {
+                if (!"我已知晓".contentEquals(confirmEdit.getText())) {
+                    confirmEdit.setError("请输入“我已知晓”");
+                    return;
+                }
+                boolean deleted = cookieProfileManager.deleteProfiles(group.profiles);
+                Toast.makeText(
+                        activity,
+                        deleted ? R.string.cookie_deleted : R.string.cookie_delete_failed,
+                        Toast.LENGTH_SHORT
+                ).show();
+                if (deleted && onDeleted != null) {
+                    onDeleted.run();
+                }
+                if (deleted) {
+                    confirmDialog.dismiss();
+                }
+            });
+        });
+        confirmDialog.show();
+    }
+
+    private List<CookieProfileGroup> buildCookieProfileGroups(List<CookieProfileManager.CookieProfile> profiles) {
+        LinkedHashMap<String, CookieProfileGroup> grouped = new LinkedHashMap<>();
+        ArrayList<CookieProfileGroup> fallbackGroups = new ArrayList<>();
+        int fallbackIndex = 1;
+        for (CookieProfileManager.CookieProfile profile : profiles) {
+            if (profile == null) {
+                continue;
+            }
+            String key = CookieProfileManager.buildCookieIdentityKey(profile.userCookies);
+            if (TextUtils.isEmpty(key)) {
+                fallbackGroups.add(new CookieProfileGroup("fallback_" + fallbackIndex, profile));
+                fallbackIndex += 1;
+                continue;
+            }
+            CookieProfileGroup group = grouped.get(key);
+            if (group == null) {
+                group = new CookieProfileGroup(key, profile);
+                grouped.put(key, group);
+            } else {
+                group.add(profile);
+            }
+        }
+        ArrayList<CookieProfileGroup> result = new ArrayList<>(grouped.values());
+        result.addAll(fallbackGroups);
+        return result;
+    }
+
+    private void showEditCookieProfileDialog(CookieProfileGroup group, Runnable onUpdated) {
+        if (group == null || group.primaryProfile == null) {
+            return;
+        }
+        View dialogView = LayoutInflater.from(activity).inflate(R.layout.dialog_cookie_profile_editor, null);
+        TextView messageView = dialogView.findViewById(R.id.text_cookie_editor_message);
+        EditText fileNameEdit = dialogView.findViewById(R.id.edit_cookie_file_name);
+        EditText userNameEdit = dialogView.findViewById(R.id.edit_cookie_user_name);
+
+        String originalFileName = group.primaryProfile.file == null ? "" : group.primaryProfile.file.getName();
+        int dotIndex = originalFileName.toLowerCase(Locale.US).lastIndexOf(".xml");
+        if (dotIndex > 0) {
+            originalFileName = originalFileName.substring(0, dotIndex);
+        }
+        fileNameEdit.setText(originalFileName);
+        fileNameEdit.setSelection(fileNameEdit.getText().length());
+        userNameEdit.setText(group.primaryProfile.userName);
+        userNameEdit.setSelection(userNameEdit.getText().length());
+
+        if (group.profiles.size() > 1) {
+            messageView.setVisibility(View.VISIBLE);
+            messageView.setText("当前条目包含多个同内容 Cookie 文件，修改会同步到这一组全部文件。");
+        }
+
+        new AlertDialog.Builder(activity)
+                .setTitle(R.string.cookie_edit_title)
+                .setView(dialogView)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.clipboard_cookie_confirm_save, (dialog, which) -> {
+                    File updatedFile = cookieProfileManager.updateProfilesMetadata(
+                            group.profiles,
+                            fileNameEdit.getText().toString(),
+                            userNameEdit.getText().toString()
+                    );
+                    if (updatedFile == null) {
+                        Toast.makeText(activity, R.string.cookie_edit_failed, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    Toast.makeText(activity, R.string.cookie_edit_saved, Toast.LENGTH_SHORT).show();
+                    if (onUpdated != null) {
+                        onUpdated.run();
+                    }
+                })
+                .show();
+    }
+
     private void applyCookieProfile(CookieProfileManager.CookieProfile profile) {
-        String targetUrl = CookieProfileManager.buildTargetUrl(profile);
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            cookieManager.removeAllCookies(value -> applyCookieProfileAfterClearing(profile));
+            cookieManager.flush();
+        } else {
+            cookieManager.removeAllCookie();
+            cookieManager.removeSessionCookie();
+            applyCookieProfileAfterClearing(profile);
+        }
+    }
+
+    private void applyCookieProfileAfterClearing(CookieProfileManager.CookieProfile profile) {
+        if (profile == null) {
+            return;
+        }
+        String targetUrl = CookieProfileManager.buildTargetUrl(profile);
+        CookieManager cookieManager = CookieManager.getInstance();
         List<String> cookieEntries = CookieProfileManager.buildCookieApplicationList(profile.userCookies);
         if (cookieEntries.isEmpty()) {
             cookieManager.setCookie(profile.userDomain, profile.userCookies);
@@ -3968,5 +4345,236 @@ final class BrowserSettingsController {
 
     private String buildFontMenuTitle(int currentMode, int itemMode, String label) {
         return (currentMode == itemMode ? "✓ " : "") + label;
+    }
+
+    private static final class CookieProfileGroup {
+        final String key;
+        final ArrayList<CookieProfileManager.CookieProfile> profiles = new ArrayList<>();
+        final LinkedHashSet<String> fileNames = new LinkedHashSet<>();
+        final LinkedHashSet<String> userNames = new LinkedHashSet<>();
+        CookieProfileManager.CookieProfile primaryProfile;
+        String displayFileNames;
+        String displayUserNames;
+
+        CookieProfileGroup(String key, CookieProfileManager.CookieProfile profile) {
+            this.key = key;
+            add(profile);
+        }
+
+        void add(CookieProfileManager.CookieProfile profile) {
+            if (profile == null) {
+                return;
+            }
+            if (primaryProfile == null) {
+                primaryProfile = profile;
+            }
+            profiles.add(profile);
+            if (profile.file != null) {
+                fileNames.add(profile.file.getName());
+            }
+            if (!TextUtils.isEmpty(profile.userName)) {
+                userNames.add(profile.userName);
+            }
+            displayFileNames = TextUtils.join("; ", fileNames);
+            displayUserNames = TextUtils.join("; ", userNames);
+        }
+    }
+}
+
+final class ClipboardCookieImportController {
+    private final AppCompatActivity activity;
+    private final CookieProfileManager cookieProfileManager;
+    private final Runnable requestAllFilesAccessAction;
+    private final Runnable delayedClipboardCheck = this::checkClipboardIfNeeded;
+
+    private AlertDialog confirmDialog;
+    private CookieProfileManager.ImportedProfile pendingImportProfile;
+    private String pendingImportSignature;
+    private String pendingImportFileName;
+    private String pendingImportUserName;
+    private String lastHandledSignature;
+    private String lastDismissedSignature;
+    private boolean waitingForStoragePermission;
+
+    ClipboardCookieImportController(
+            AppCompatActivity activity,
+            CookieProfileManager cookieProfileManager,
+            Runnable requestAllFilesAccessAction
+    ) {
+        this.activity = activity;
+        this.cookieProfileManager = cookieProfileManager;
+        this.requestAllFilesAccessAction = requestAllFilesAccessAction;
+    }
+
+    void onResume() {
+        if (waitingForStoragePermission) {
+            if (cookieProfileManager.canAccessRootDirectory() && pendingImportProfile != null) {
+                saveImportedProfile(
+                        pendingImportProfile,
+                        pendingImportSignature,
+                        pendingImportFileName,
+                        pendingImportUserName
+                );
+            }
+        }
+    }
+
+    void onWindowFocusChanged(boolean hasFocus) {
+        activity.getWindow().getDecorView().removeCallbacks(delayedClipboardCheck);
+        if (!hasFocus) {
+            return;
+        }
+        activity.getWindow().getDecorView().postDelayed(delayedClipboardCheck, 200L);
+    }
+
+    private void checkClipboardIfNeeded() {
+        if (confirmDialog != null && confirmDialog.isShowing()) {
+            return;
+        }
+
+        ClipboardSnapshot snapshot = readClipboardSnapshot();
+        if (snapshot == null) {
+            return;
+        }
+        if (snapshot.signature.equals(lastHandledSignature) || snapshot.signature.equals(lastDismissedSignature)) {
+            return;
+        }
+
+        CookieProfileManager.ImportedProfile importedProfile =
+                cookieProfileManager.parseImportedProfileText(snapshot.text);
+        if (importedProfile == null) {
+            return;
+        }
+        showImportConfirmation(importedProfile, snapshot.signature);
+    }
+
+    private ClipboardSnapshot readClipboardSnapshot() {
+        if (!activity.hasWindowFocus()) {
+            return null;
+        }
+        ClipboardManager clipboardManager =
+                (ClipboardManager) activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+        if (clipboardManager == null || !clipboardManager.hasPrimaryClip()) {
+            return null;
+        }
+        android.content.ClipData clipData;
+        try {
+            clipData = clipboardManager.getPrimaryClip();
+            if (clipData == null || clipData.getItemCount() == 0) {
+                return null;
+            }
+        } catch (SecurityException e) {
+            Log.w("FlashBrowser", "Clipboard access denied before window focus settles", e);
+            return null;
+        }
+        CharSequence coerced = clipData.getItemAt(0).coerceToText(activity);
+        if (TextUtils.isEmpty(coerced)) {
+            return null;
+        }
+        String text = coerced.toString().trim();
+        if (text.isEmpty()) {
+            return null;
+        }
+        return new ClipboardSnapshot(text, buildSignature(text));
+    }
+
+    private void showImportConfirmation(
+            CookieProfileManager.ImportedProfile importedProfile,
+            String signature
+    ) {
+        View dialogView = LayoutInflater.from(activity).inflate(R.layout.dialog_cookie_profile_editor, null);
+        TextView messageView = dialogView.findViewById(R.id.text_cookie_editor_message);
+        EditText fileNameEdit = dialogView.findViewById(R.id.edit_cookie_file_name);
+        EditText userNameEdit = dialogView.findViewById(R.id.edit_cookie_user_name);
+        messageView.setVisibility(View.VISIBLE);
+        messageView.setText(R.string.clipboard_cookie_detected_message);
+
+        String defaultName = TextUtils.isEmpty(importedProfile.userName)
+                ? cookieProfileManager.buildDefaultProfileName()
+                : importedProfile.userName;
+        fileNameEdit.setText(defaultName);
+        fileNameEdit.setSelection(fileNameEdit.getText().length());
+        userNameEdit.setText(defaultName);
+        userNameEdit.setSelection(userNameEdit.getText().length());
+
+        final boolean[] accepted = {false};
+        confirmDialog = new AlertDialog.Builder(activity)
+                .setTitle(R.string.clipboard_cookie_detected_title)
+                .setView(dialogView)
+                .setNegativeButton(android.R.string.cancel, (dialog, which) -> lastDismissedSignature = signature)
+                .setPositiveButton(R.string.clipboard_cookie_confirm_save, (dialog, which) -> {
+                    accepted[0] = true;
+                    handleConfirmedImport(
+                            importedProfile,
+                            signature,
+                            fileNameEdit.getText().toString(),
+                            userNameEdit.getText().toString()
+                    );
+                })
+                .create();
+        confirmDialog.setOnDismissListener(dialog -> {
+            if (!accepted[0]) {
+                lastDismissedSignature = signature;
+            }
+            confirmDialog = null;
+        });
+        confirmDialog.show();
+    }
+
+    private void handleConfirmedImport(
+            CookieProfileManager.ImportedProfile importedProfile,
+            String signature,
+            String fileName,
+            String userName
+    ) {
+        if (!cookieProfileManager.canAccessRootDirectory()) {
+            pendingImportProfile = importedProfile;
+            pendingImportSignature = signature;
+            pendingImportFileName = fileName;
+            pendingImportUserName = userName;
+            waitingForStoragePermission = true;
+            requestAllFilesAccessAction.run();
+            return;
+        }
+        saveImportedProfile(importedProfile, signature, fileName, userName);
+    }
+
+    private void saveImportedProfile(
+            CookieProfileManager.ImportedProfile importedProfile,
+            String signature,
+            String fileName,
+            String userName
+    ) {
+        File savedFile = cookieProfileManager.saveImportedProfile(importedProfile, fileName, userName);
+        waitingForStoragePermission = false;
+        pendingImportProfile = null;
+        pendingImportSignature = null;
+        pendingImportFileName = null;
+        pendingImportUserName = null;
+        if (savedFile == null) {
+            Toast.makeText(activity, R.string.clipboard_cookie_save_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
+        lastHandledSignature = signature;
+        lastDismissedSignature = null;
+        Toast.makeText(
+                activity,
+                activity.getString(R.string.clipboard_cookie_saved, savedFile.getName()),
+                Toast.LENGTH_LONG
+        ).show();
+    }
+
+    private String buildSignature(String text) {
+        return Integer.toHexString(text.hashCode()) + ":" + text.length();
+    }
+
+    private static final class ClipboardSnapshot {
+        final String text;
+        final String signature;
+
+        ClipboardSnapshot(String text, String signature) {
+            this.text = text;
+            this.signature = signature;
+        }
     }
 }

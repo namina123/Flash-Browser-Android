@@ -23,13 +23,30 @@
             android:enableOnBackInvokedCallback="true"
             android:hardwareAccelerated="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden"
-            android:exported="true" >
+            android:exported="true"
+            android:launchMode="singleTop" >
             <property
                 android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
                 android:value="true" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="text/xml" />
+                <data android:scheme="content" android:mimeType="application/xml" />
+                <data android:scheme="file" android:mimeType="text/xml" />
+                <data android:scheme="file" android:mimeType="application/xml" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="application/zip" />
+                <data android:scheme="content" android:mimeType="application/x-zip-compressed" />
+                <data android:scheme="file" android:mimeType="application/zip" />
+                <data android:scheme="file" android:mimeType="application/x-zip-compressed" />
             </intent-filter>
         </activity>
     </application>

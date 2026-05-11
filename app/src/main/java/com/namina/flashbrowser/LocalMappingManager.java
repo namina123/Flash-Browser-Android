@@ -10,6 +10,7 @@ import org.json.JSONException;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -29,6 +30,9 @@ final class LocalMappingManager {
     private static final String PVZOL_HOST = "pvzol.org";
     private static final String PVZOL_MAIN_PATH = "/pvz/index.php/default/main";
     private static final String BUILT_IN_CACHE_DIR_NAME = "PVZOLcache";
+    private static final int BUILT_IN_MAIN_STYLE_SIMPLE = 0;
+    private static final int BUILT_IN_MAIN_STYLE_CLASSIC = 1;
+    private static final int DEFAULT_BUILT_IN_MAIN_STYLE = BUILT_IN_MAIN_STYLE_CLASSIC;
 
     private final Context context;
     private final File configFile;
@@ -86,7 +90,7 @@ final class LocalMappingManager {
 
         String path = normalizeRequestPath(uri.getPath());
         if (PVZOL_MAIN_PATH.equals(path)) {
-            return null;
+            return buildGeneratedMainPage(uri, DEFAULT_BUILT_IN_MAIN_STYLE);
         }
 
         String relativePath = MappingRule.sanitizeRelativePath(stripLeadingSlash(path));
@@ -107,6 +111,217 @@ final class LocalMappingManager {
             }
         }
         return null;
+    }
+
+    private MappedResource buildGeneratedMainPage(Uri uri, int style) {
+        String rootUrl = buildRootUrl(uri);
+        if (TextUtils.isEmpty(rootUrl)) {
+            return null;
+        }
+
+        String swfUrl = rootUrl + "/youkia/main.swf";
+        String baseUrl = rootUrl + "/pvz/index.php/";
+        String baseUrlInfo = rootUrl + "/youkia/";
+        String html = buildGeneratedMainHtml(style, rootUrl, swfUrl, baseUrl, baseUrlInfo);
+        return new MappedResource(
+                new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8)),
+                "text/html",
+                StandardCharsets.UTF_8.name()
+        );
+    }
+
+    private String buildGeneratedMainHtml(
+            int style,
+            String rootUrl,
+            String swfUrl,
+            String baseUrl,
+            String baseUrlInfo
+    ) {
+        if (style == BUILT_IN_MAIN_STYLE_CLASSIC) {
+            return buildClassicMainHtml(rootUrl, swfUrl, baseUrl, baseUrlInfo);
+        }
+
+        String escapedRootUrl = escapeHtml(rootUrl);
+        String escapedSwfUrl = escapeHtml(swfUrl);
+        String flashVars = "base_url=" + baseUrl + "&base_url_info=" + baseUrlInfo;
+        String escapedFlashVars = escapeHtml(flashVars);
+
+        return "<!DOCTYPE html>\n"
+                + "<html>\n"
+                + "<head>\n"
+                + "  <meta charset=\"UTF-8\">\n"
+                + "  <title>PVZOL Main</title>\n"
+                + "  <style>\n"
+                + "    html,body{margin:0;padding:0;width:100%;height:100%;background:#ffffff;overflow:hidden;}\n"
+                + "    body{display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;}\n"
+                + "    .game-shell{position:relative;width:min(100vw,760px);aspect-ratio:760/535;max-height:100vh;display:flex;align-items:center;justify-content:center;background:#ffffff;}\n"
+                + "    .game-shell embed,.game-shell object{width:100%;height:100%;display:block;}\n"
+                + "    .boot-note{position:fixed;left:8px;bottom:8px;font-size:11px;color:#666;opacity:.6;pointer-events:none;user-select:none;}\n"
+                + "  </style>\n"
+                + "</head>\n"
+                + "<body>\n"
+                + "  <div class=\"game-shell\">\n"
+                + "    <embed id=\"pvz-main\" src=\"" + escapedSwfUrl + "\" width=\"760\" height=\"535\" quality=\"high\" scale=\"showAll\" allowfullscreen=\"true\" allowscriptaccess=\"always\" flashvars=\"" + escapedFlashVars + "\">\n"
+                + "  </div>\n"
+                + "  <div class=\"boot-note\">" + escapedRootUrl + "</div>\n"
+                + "</body>\n"
+                + "</html>\n";
+    }
+
+    private String buildClassicMainHtml(
+            String rootUrl,
+            String swfUrl,
+            String baseUrl,
+            String baseUrlInfo
+    ) {
+        String escapedSwfUrl = escapeHtml(swfUrl);
+        String escapedBaseUrl = escapeHtml(baseUrl);
+        String escapedBaseUrlInfo = escapeHtml(baseUrlInfo);
+        String flashVars = "base_url=" + baseUrl + "&base_url_info=" + baseUrlInfo;
+        String escapedFlashVars = escapeHtml(flashVars);
+        String homeUrl = rootUrl + "/pvz/index.php/default/main";
+        String inviteUrl = rootUrl + "/pvz/index.php/invite";
+        String topupUrl = buildClassicTopupUrl(rootUrl);
+        String classicTitle = "植物大战僵尸 - 首页";
+        String imageBaseUrl = rootUrl + "/img";
+        String bannerImage = "http://www.youkia.com/images/pvz/20150906/pvz-web-left.jpg";
+        String bannerTarget = "http://pvz.youkia.com/xf/index.php";
+        String baseAttribute = escapeHtml(baseUrlInfo.substring(0, Math.max(0, baseUrlInfo.length() - 1)));
+
+        return "<!DOCTYPE html>\n"
+                + "<html>\n"
+                + "<head>\n"
+                + "  <meta charset=\"UTF-8\">\n"
+                + "  <title>" + classicTitle + "</title>\n"
+                + "  <style>\n"
+                + "    *{margin:0;padding:0;}\n"
+                + "    ul li{list-style-type:none;}\n"
+                + "    body{background:url(" + escapeHtml(imageBaseUrl + "/pvz_bbg.jpg") + ") no-repeat top center;font-size:12px;color:#666;}\n"
+                + "    .wrap{margin:0 auto;text-align:center;width:886px;position:relative;}\n"
+                + "    .main{float:right;width:793px;}\n"
+                + "    .top,.menu,.flash{clear:both;float:left;width:100%;}\n"
+                + "    .top{width:788px;height:30px;font:normal 12px/30px Arial;background:url(" + escapeHtml(imageBaseUrl + "/gg_bg.jpg") + ") no-repeat;text-align:left;overflow:hidden;}\n"
+                + "    .top a{display:inline;float:left;margin:0 0 0 50px;font:bold 14px/30px Arial;color:#000;text-decoration:none;}\n"
+                + "    .menu{margin:5px 0 0 0;padding:17px 0 0 242px;width:551px;height:54px;background:url(" + escapeHtml(imageBaseUrl + "/menu.jpg") + ") no-repeat;}\n"
+                + "    .menu a{display:inline;float:left;width:81px;height:33px;}\n"
+                + "    .flash{padding:23px 15px 21px 13px;width:760px;height:535px;background:url(" + escapeHtml(imageBaseUrl + "/flashbg.gif") + ") no-repeat;}\n"
+                + "    .main_news{margin:0 auto;width:760px;background-color:#FFF;}\n"
+                + "    .main_news h2{background:url(http://pvz-s1.youkia.com/openapi/announce/images/tit.jpg) no-repeat;height:32px;}\n"
+                + "    .new{border:1px #BADEF0 solid;overflow:hidden;_height:100%;border-top:0;border-bottom:0;margin-top:-15px;}\n"
+                + "    .new_box{float:left;width:360px;margin-top:15px;font-size:12px;padding:10px 0 0 15px;text-align:left;}\n"
+                + "    .new_box li span{color:#2D839C;}\n"
+                + "    .new_box li a{color:#FF0000;text-decoration:none;}\n"
+                + "    .main_news h3{clear:both;background:url(http://pvz-s1.youkia.com/openapi/announce/images/di.jpg) no-repeat;height:20px;}\n"
+                + "    .pop_pvz_01{float:left;margin:122px 0 0 0;width:86px;height:534px;background:url(" + escapeHtml(imageBaseUrl + "/side_link2012-6-7.jpg") + ") no-repeat;}\n"
+                + "    .pop_pvz_02{float:left;margin:122px 0 0 0;width:86px;height:534px;background:url(" + escapeHtml(imageBaseUrl + "/side_link2012-6-2.png") + ") no-repeat;}\n"
+                + "    .pop_pvz_03{float:left;margin:122px 0 0 0;width:86px;height:534px;background:url(" + escapeHtml(imageBaseUrl + "/sidebg.jpg") + ") no-repeat;position:relative;}\n"
+                + "    .pop_pvz_side{float:left;background:url(" + escapeHtml(imageBaseUrl + "/2011-09-22.gif") + ") no-repeat;width:68px;height:335px;position:absolute;z-index:50;left:9px;top:85px;}\n"
+                + "    .pop_pvz_side a{display:block;width:68px;height:360px;margin-top:10px;}\n"
+                + "    a.pop_pvzt,.pop_pvzc,a.pop_pvzb,.pop_pvzc a{clear:both;display:inline;float:left;width:55px;}\n"
+                + "    a.pop_pvzt{margin:16px 0 0 15px;height:58px;}\n"
+                + "    .pop_pvzc a{margin:24px 0 0 15px;height:54px;}\n"
+                + "    a.pop_pvzb{margin:10px 0 0 17px;width:54px;height:16px;}\n"
+                + "    .wec{position:absolute;z-index:100;top:415px;}\n"
+                + "    .wec a{width:50px;height:20px;display:block;}\n"
+                + "    iframe{display:none;}\n"
+                + "  </style>\n"
+                + "</head>\n"
+                + "<body>\n"
+                + "  <div class=\"wrap\">\n"
+                + "    <div class=\"main\">\n"
+                + "      <div class=\"main_news\" id=\"main_news\">\n"
+                + "        <h2></h2>\n"
+                + "        <div class=\"new\">\n"
+                + "          <ul class=\"new_box\"><li><span>【2012-12-04】</span><a href=\"http://f.youkia.com/forum/read.php?tid=219364\" title=\"《植物大战僵尸online》首届跨服战宣传\" target=\"_blank\">《植物大战僵尸online》首届跨服战宣传</a></li></ul>\n"
+                + "          <ul class=\"new_box\"><li><span>【2013-01-14】</span><a href=\"http://f.youkia.com/forum/read.php?tid=245181\" title=\"充值送好礼 好礼送不停\" target=\"_blank\">充值送好礼 好礼送不停</a></li></ul>\n"
+                + "        </div>\n"
+                + "        <h3></h3>\n"
+                + "      </div>\n"
+                + "      <div class=\"menu\">\n"
+                + "        <a id=\"home\" href=\"" + escapeHtml(homeUrl) + "\" title=\"首页\"></a>\n"
+                + "        <a id=\"invite\" href=\"" + escapeHtml(inviteUrl) + "\" title=\"邀请\"></a>\n"
+                + "        <a id=\"fourm\" href=\"http://f.youkia.com/forum/forum.php?mod=forumdisplay&amp;fid=44&amp;page=1\" title=\"讨论\" target=\"_blank\"></a>\n"
+                + "        <a id=\"help\" href=\"http://f.youkia.com/forum/forum.php?mod=viewthread&amp;tid=11&amp;extra=page%3D1\" title=\"帮助\" target=\"_blank\"></a>\n"
+                + "        <a id=\"topup\" href=\"" + escapeHtml(topupUrl) + "\" title=\"充值\" target=\"_blank\"></a>\n"
+                + "      </div>\n"
+                + "      <div class=\"flash\">\n"
+                + "        <object classid=\"clsid:d27cdb6e-ae6d-11cf-96b8-444553540000\" codebase=\"http://download.macromedia.com/pub/shockwave/cabs/flash/swflash.cab#version=9,0,0,0\" width=\"760\" height=\"535\" id=\"pvz\" align=\"middle\">\n"
+                + "          <param name=\"quality\" value=\"high\">\n"
+                + "          <param name=\"allowScriptAccess\" value=\"always\">\n"
+                + "          <param name=\"movie\" value=\"" + escapedSwfUrl + "\">\n"
+                + "          <param name=\"flashvars\" value=\"" + escapedFlashVars + "\">\n"
+                + "          <param name=\"base\" value=\"" + baseAttribute + "\">\n"
+                + "          <embed id=\"pvz-main\" src=\"" + escapedSwfUrl + "\" width=\"760\" height=\"535\" quality=\"high\" allowscriptaccess=\"always\" flashvars=\"" + escapedFlashVars + "\" base=\"" + baseAttribute + "\">\n"
+                + "        </object>\n"
+                + "      </div>\n"
+                + "    </div>\n"
+                + "    <div id=\"banner1\" class=\"pop_pvz_01\" style=\"left:-120px;position:absolute;margin-top:180px;display:block;\"><a href=\"" + escapeHtml(bannerTarget) + "\" target=\"_blank\"><img src=\"" + escapeHtml(bannerImage) + "\"></a></div>\n"
+                + "  </div>\n"
+                + "</body>\n"
+                + "</html>\n";
+    }
+
+    private String buildClassicTopupUrl(String rootUrl) {
+        Uri uri = Uri.parse(rootUrl);
+        String host = uri.getHost();
+        String serverId = extractServerNumericId(host);
+        if (TextUtils.isEmpty(serverId)) {
+            return "http://www.youkia.com/index.php/purse/topup?step=2&game_id=2&pay_way_id=1";
+        }
+        return "http://www.youkia.com/index.php/purse/topup?step=2&game_id=2&pay_way_id=1&server_id=" + serverId;
+    }
+
+    private String extractClassicTitle(String rootUrl) {
+        Uri uri = Uri.parse(rootUrl);
+        String host = uri.getHost();
+        if (!TextUtils.isEmpty(host)) {
+            return "植物大战僵尸 - 首页";
+        }
+        return "PVZOL Main";
+    }
+
+    private String extractServerNumericId(String host) {
+        if (TextUtils.isEmpty(host)) {
+            return null;
+        }
+        String normalized = host.toLowerCase(Locale.US);
+        if (!normalized.startsWith("s")) {
+            return null;
+        }
+        int index = 1;
+        StringBuilder digits = new StringBuilder();
+        while (index < normalized.length()) {
+            char current = normalized.charAt(index);
+            if (current < '0' || current > '9') {
+                break;
+            }
+            digits.append(current);
+            index += 1;
+        }
+        return digits.length() == 0 ? null : digits.toString();
+    }
+
+    private String buildRootUrl(Uri uri) {
+        if (uri == null || TextUtils.isEmpty(uri.getEncodedAuthority())) {
+            return null;
+        }
+        return new Uri.Builder()
+                .scheme(TextUtils.isEmpty(uri.getScheme()) ? "http" : uri.getScheme())
+                .encodedAuthority(uri.getEncodedAuthority())
+                .build()
+                .toString()
+                .replaceAll("/$", "");
+    }
+
+    private String escapeHtml(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
     }
 
     private boolean isBuiltInMappedHost(String host) {
