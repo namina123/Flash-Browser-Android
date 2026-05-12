@@ -3973,7 +3973,19 @@ final class BrowserSettingsController {
             return;
         }
 
-        String cookies = CookieManager.getInstance().getCookie(currentUrl);
+        CookieManager cookieManager = CookieManager.getInstance();
+        String cookies = cookieManager.getCookie(currentUrl);
+        if (CookieProfileManager.isLegacyYoukiaLandingPage(currentUri)) {
+            String targetMainUrl = CookieProfileManager.buildMainTargetUrlForPage(currentUri);
+            String targetRootUrl = CookieProfileManager.buildRootUrl(currentUri);
+            String targetCookies = TextUtils.isEmpty(targetMainUrl) ? null : cookieManager.getCookie(targetMainUrl);
+            if (TextUtils.isEmpty(targetCookies) && !TextUtils.isEmpty(targetRootUrl)) {
+                targetCookies = cookieManager.getCookie(targetRootUrl);
+            }
+            if (!TextUtils.isEmpty(targetCookies)) {
+                cookies = targetCookies;
+            }
+        }
         if (TextUtils.isEmpty(cookies)) {
             Toast.makeText(activity, "Current page has no cookies", Toast.LENGTH_SHORT).show();
             return;
