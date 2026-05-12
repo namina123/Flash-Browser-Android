@@ -92,6 +92,10 @@ final class PvzolAmfClient {
         boolean containsFrequentMessage() {
             return responseText != null && responseText.contains("频繁");
         }
+
+        boolean containsCannotClaimMessage() {
+            return responseText != null && responseText.contains("不能领取");
+        }
     }
 
     static final class RewardRequest {
@@ -139,6 +143,10 @@ final class PvzolAmfClient {
 
     static Response postDutyGetAll(String baseUrl, String cookies, ActiveCall call) throws IOException {
         return postRpc(baseUrl, "api.duty.getAll", new int[0], cookies, call);
+    }
+
+    static String getRewardSummary(int rewardId) {
+        return DutyRewardCatalog.getRewardSummary(rewardId);
     }
 
     static DutyTaskPlan planDutyRewardRequests(Object decodedValue) {

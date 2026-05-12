@@ -48,6 +48,12 @@ final class CookieProfileManager {
     private static final String LEGACY_YOUKIA_HOST = "www.youkia.com";
     private static final String LEGACY_YOUKIA_PREFIX = "/pvz/";
     private static final String LEGACY_YOUKIA_INDEX_PREFIX = "/index.php/pvz/";
+    private static final Pattern LEGACY_SERVER_SUBDOMAIN_PATTERN =
+            Pattern.compile("^s(\\d+)$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SPECIAL_SERVER_HOST_PATTERN_A =
+            Pattern.compile("^pvz-s(\\d+)\\.youkia\\.com$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SPECIAL_SERVER_HOST_PATTERN_B =
+            Pattern.compile("^s(\\d+)\\.youkia\\.pvz\\.youkia\\.com$", Pattern.CASE_INSENSITIVE);
     private static final SimpleDateFormat DEFAULT_NAME_FORMAT =
             new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US);
     private static final Pattern USER_SETTING_BLOCK_PATTERN =
@@ -236,12 +242,26 @@ final class CookieProfileManager {
         if (uri == null || TextUtils.isEmpty(uri.getEncodedAuthority())) {
             return null;
         }
+        if (isLegacyYoukiaLandingPage(uri)) {
+            String subdomain = extractLegacyYoukiaSubdomain(uri);
+            if (!TextUtils.isEmpty(subdomain)) {
+                return buildServerRootUrlFromLegacySubdomain(subdomain);
+            }
+        }
         return new Uri.Builder()
-                .scheme(TextUtils.isEmpty(uri.getScheme()) ? "http" : uri.getScheme())
+                .scheme("http")
                 .encodedAuthority(uri.getEncodedAuthority())
                 .build()
                 .toString()
                 .replaceAll("/$", "");
+    }
+
+    static String buildMainTargetUrlForPage(Uri uri) {
+        String rootUrl = buildRootUrl(uri);
+        if (TextUtils.isEmpty(rootUrl)) {
+            return null;
+        }
+        return Uri.parse(rootUrl).buildUpon().encodedPath(TARGET_PATH).build().toString();
     }
 
     static boolean isDutyRewardEligibleBaseUrl(String baseUrl) {
@@ -278,7 +298,7 @@ final class CookieProfileManager {
             return null;
         }
 
-        String persistedCookies = selectPersistedCookies(cookies);
+        String persistedCookies = selectPersistedCookiesForPage(pageUri, cookies);
         if (TextUtils.isEmpty(persistedCookies)) {
             return null;
         }
@@ -491,12 +511,17 @@ final class CookieProfileManager {
     }
 
     static String selectPersistedCookies(String rawCookies) {
-        ImportantCookieInfo info = extractImportantCookies(rawCookies);
+        ImportantCookieInfo info = extractImportantCookies(rawCookies, true);
+        return info == null ? null : info.persistedCookies;
+    }
+
+    static String selectPersistedCookiesForPage(Uri pageUri, String rawCookies) {
+        ImportantCookieInfo info = extractImportantCookies(rawCookies, isGameServerHost(pageUri));
         return info == null ? null : info.persistedCookies;
     }
 
     static List<String> buildCookieApplicationList(String rawCookies) {
-        ImportantCookieInfo info = extractImportantCookies(rawCookies);
+        ImportantCookieInfo info = extractImportantCookies(rawCookies, true);
         if (info == null || TextUtils.isEmpty(info.persistedCookies)) {
             return Collections.emptyList();
         }
@@ -504,7 +529,7 @@ final class CookieProfileManager {
     }
 
     static String buildCookieIdentityKey(String rawCookies) {
-        ImportantCookieInfo info = extractImportantCookies(rawCookies);
+        ImportantCookieInfo info = extractImportantCookies(rawCookies, true);
         return info == null ? null : info.identityKey;
     }
 
@@ -539,6 +564,26 @@ final class CookieProfileManager {
             return null;
         }
         return subdomain;
+    }
+
+    static boolean isGameServerHost(Uri uri) {
+        if (uri == null) {
+            return false;
+        }
+        String host = safeLower(uri.getHost());
+        return SPECIAL_SERVER_HOST_PATTERN_A.matcher(host).matches()
+                || SPECIAL_SERVER_HOST_PATTERN_B.matcher(host).matches();
+    }
+
+    static String buildServerRootUrlFromLegacySubdomain(String subdomain) {
+        int serverNumber = parseServerNumber(subdomain);
+        if (serverNumber >= 1 && serverNumber <= 12) {
+            return "http://pvz-s" + serverNumber + ".youkia.com";
+        }
+        if (serverNumber >= 13) {
+            return "http://s" + serverNumber + ".youkia.pvz.youkia.com";
+        }
+        return TextUtils.isEmpty(subdomain) ? null : "http://" + subdomain + ".youkia.pvz.youkia.com";
     }
 
     private String buildUniqueFileName(String baseName) {
@@ -672,10 +717,13 @@ final class CookieProfileManager {
     }
 
     private String resolveSaveUserDomain(Uri pageUri) {
+        if (isGameServerHost(pageUri)) {
+            return buildRootUrl(pageUri);
+        }
         if (isLegacyYoukiaLandingPage(pageUri)) {
             String subdomain = extractLegacyYoukiaSubdomain(pageUri);
             if (!TextUtils.isEmpty(subdomain)) {
-                return "http://" + subdomain + ".youkia.pvz.youkia.com";
+                return buildServerRootUrlFromLegacySubdomain(subdomain);
             }
         }
 
@@ -710,7 +758,7 @@ final class CookieProfileManager {
         return value == null ? "" : value.trim().toLowerCase(Locale.US);
     }
 
-    private static ImportantCookieInfo extractImportantCookies(String rawCookies) {
+    private static ImportantCookieInfo extractImportantCookies(String rawCookies, boolean allowStrongCookieSet) {
         List<String> entries = splitCookieEntries(rawCookies);
         if (entries.isEmpty()) {
             return null;
@@ -739,7 +787,7 @@ final class CookieProfileManager {
             }
         }
 
-        if (!phpSessions.isEmpty() && !pvzYoukiaEntries.isEmpty()) {
+        if (allowStrongCookieSet && !phpSessions.isEmpty() && !pvzYoukiaEntries.isEmpty()) {
             ArrayList<String> persistedEntries = new ArrayList<>(phpSessions.size() + pvzYoukiaEntries.size());
             persistedEntries.addAll(phpSessions);
             persistedEntries.addAll(pvzYoukiaEntries);
@@ -759,6 +807,21 @@ final class CookieProfileManager {
         }
 
         return null;
+    }
+
+    private static int parseServerNumber(String subdomain) {
+        if (TextUtils.isEmpty(subdomain)) {
+            return -1;
+        }
+        Matcher matcher = LEGACY_SERVER_SUBDOMAIN_PATTERN.matcher(subdomain.trim());
+        if (!matcher.matches()) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(matcher.group(1));
+        } catch (Exception e) {
+            return -1;
+        }
     }
 
     private static void addUniqueCookieEntry(List<String> target, String entry) {
@@ -842,7 +905,10 @@ final class CookieProfileManager {
             }
 
             String normalizedDomain = normalizeRootUrl(fields.userDomain);
-            ImportantCookieInfo cookieInfo = extractImportantCookies(fields.userCookies);
+            ImportantCookieInfo cookieInfo = extractImportantCookies(
+                    fields.userCookies,
+                    isGameServerHost(Uri.parse(normalizedDomain))
+            );
             if (TextUtils.isEmpty(normalizedDomain) || cookieInfo == null) {
                 continue;
             }

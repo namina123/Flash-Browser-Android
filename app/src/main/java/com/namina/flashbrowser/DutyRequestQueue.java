@@ -15,6 +15,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 
 final class DutyRequestQueue {
+    private static final int CLAIM_BLOCK_INTERVAL_MS = 14000;
 
     interface Listener {
         void onQueueUpdated(StateSnapshot snapshot);
@@ -387,13 +388,19 @@ final class DutyRequestQueue {
                 handleFrequentResponse(task, response, "api.duty.reward [" + task.rewardId + "," + task.category + "]");
                 return;
             }
+            if (response.containsCannotClaimMessage()) {
+                handleCannotClaimResponse(task, response);
+                return;
+            }
 
             boolean success = response.httpStatusCode >= 200
                     && response.httpStatusCode < 300
                     && response.isApplicationSuccess();
             synchronized (lock) {
                 if (success) {
+                    String rewardSummary = PvzolAmfClient.getRewardSummary(task.rewardId);
                     appendLogLocked(task.target.label + " [" + task.rewardId + "," + task.category + "] success"
+                            + (TextUtils.isEmpty(rewardSummary) ? "" : " reward=" + rewardSummary)
                             + (TextUtils.isEmpty(response.description) ? "" : ": " + response.description));
                 } else {
                     failed += 1;
@@ -411,6 +418,20 @@ final class DutyRequestQueue {
             }
         } finally {
             activeConnections.remove(activeConnection);
+        }
+    }
+
+    private void handleCannotClaimResponse(RequestTask task, PvzolAmfClient.Response response) {
+        synchronized (lock) {
+            failed += 1;
+            long resumeUptimeMs = SystemClock.uptimeMillis() + CLAIM_BLOCK_INTERVAL_MS;
+            cookieCooldownUntilMs.put(task.cookieKey(), Long.valueOf(resumeUptimeMs));
+            appendLogLocked(task.target.label + " ["
+                    + task.rewardId + "," + task.category + "] failed: response contains 不能领取, cooldown "
+                    + CLAIM_BLOCK_INTERVAL_MS + "ms"
+                    + (TextUtils.isEmpty(response.description) ? "" : ", " + response.description));
+            lock.notifyAll();
+            notifyListenerLocked();
         }
     }
 

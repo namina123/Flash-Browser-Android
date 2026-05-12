@@ -1212,7 +1212,7 @@ final class BrowserNavigationController {
                 return null;
             }
 
-            return "http://" + subdomain + ".youkia.pvz.youkia.com/pvz/index.php/default/main";
+            return CookieProfileManager.buildMainTargetUrlForPage(uri);
         } catch (Exception e) {
             Log.e(TAG, "Failed to rewrite youkia url: " + rawUrl, e);
             return null;
@@ -1503,7 +1503,10 @@ final class FeaturePanelDialogController {
             return null;
         }
 
-        String cookies = CookieManager.getInstance().getCookie(currentUrl);
+        String cookies = CookieProfileManager.selectPersistedCookiesForPage(
+                currentUri,
+                CookieManager.getInstance().getCookie(currentUrl)
+        );
         String baseUrl = CookieProfileManager.buildRootUrl(currentUri);
         if (TextUtils.isEmpty(cookies) || TextUtils.isEmpty(baseUrl)) {
             return null;
