@@ -51,4 +51,37 @@
         android:maxLines="1"
         android:singleLine="true" />
 
+    <LinearLayout
+        android:id="@+id/layout_cookie_server_selection"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/clipboard_cookie_server_label"
+            android:textColor="#111827"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/spinner_cookie_server"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" />
+
+        <EditText
+            android:id="@+id/edit_cookie_server_number"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="@string/clipboard_cookie_server_hint"
+            android:inputType="number"
+            android:maxLines="1"
+            android:singleLine="true" />
+    </LinearLayout>
+
 </LinearLayout>

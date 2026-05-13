@@ -16,6 +16,7 @@ public final class BrowserPreferenceStore {
     private static final String PREF_PANEL_SELECTED_COOKIE_KEYS = "panel_selected_cookie_keys";
     private static final String PREF_PANEL_SELECT_CURRENT_PAGE_COOKIE = "panel_select_current_page_cookie";
     private static final String PREF_PANEL_TASK_DAILY_DUTY = "panel_task_daily_duty";
+    private static final String PREF_PANEL_TASK_DUTY_FULL_SWEEP = "panel_task_duty_full_sweep";
     private static final String PREF_PANEL_REPOSITORY_RECORDS = "panel_repository_records";
 
     private final SharedPreferences preferences;
@@ -70,6 +71,14 @@ public final class BrowserPreferenceStore {
 
     void setPanelDailyDutyEnabled(boolean enabled) {
         preferences.edit().putBoolean(PREF_PANEL_TASK_DAILY_DUTY, enabled).apply();
+    }
+
+    boolean isPanelDutyFullSweepEnabled() {
+        return preferences.getBoolean(PREF_PANEL_TASK_DUTY_FULL_SWEEP, false);
+    }
+
+    void setPanelDutyFullSweepEnabled(boolean enabled) {
+        preferences.edit().putBoolean(PREF_PANEL_TASK_DUTY_FULL_SWEEP, enabled).apply();
     }
 
     boolean isCurrentPageCookieSelectedByDefault() {

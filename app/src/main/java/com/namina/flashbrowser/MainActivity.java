@@ -45,6 +45,8 @@ import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.ArrayAdapter;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.webkit.ConsoleMessage;
@@ -1106,8 +1108,7 @@ final class BrowserNavigationController {
         if (TextUtils.isEmpty(sourceUrl) || TextUtils.isEmpty(targetUrl)) {
             return;
         }
-        copyCookiesForRedirect(sourceUrl, targetUrl);
-        loadUrl(targetUrl);
+        performRedirectWithPreferredCookies(sourceUrl, targetUrl);
     }
 
     String normalizeInputToUrl(String rawInput) {
@@ -1154,23 +1155,75 @@ final class BrowserNavigationController {
         webView.requestFocus();
     }
 
-    private void copyCookiesForRedirect(String sourceUrl, String targetUrl) {
-        if (TextUtils.isEmpty(sourceUrl) || TextUtils.isEmpty(targetUrl)) {
-            return;
-        }
+    private void performRedirectWithPreferredCookies(String sourceUrl, String fallbackTargetUrl) {
+        Uri sourceUri = Uri.parse(sourceUrl);
+        Uri fallbackTargetUri = Uri.parse(fallbackTargetUrl);
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(true);
 
+        String chosenTargetUrl = fallbackTargetUrl;
+        String selectedCookies = null;
         try {
-            CookieManager cookieManager = CookieManager.getInstance();
-            String cookies = cookieManager.getCookie(sourceUrl);
-            if (TextUtils.isEmpty(cookies)) {
-                return;
+            for (String candidateRootUrl : CookieProfileManager.buildCandidateGameRootUrlsForLegacyPage(sourceUri)) {
+                Uri candidateRootUri = Uri.parse(candidateRootUrl);
+                String candidateMainUrl = CookieProfileManager.buildMainTargetUrlForPage(candidateRootUri);
+                String candidateCookies = null;
+                if (!TextUtils.isEmpty(candidateMainUrl)) {
+                    candidateCookies = cookieManager.getCookie(candidateMainUrl);
+                }
+                if (TextUtils.isEmpty(candidateCookies)) {
+                    candidateCookies = cookieManager.getCookie(candidateRootUrl);
+                }
+                candidateCookies = CookieProfileManager.selectPersistedCookiesForPage(candidateRootUri, candidateCookies);
+                if (!TextUtils.isEmpty(candidateCookies)) {
+                    selectedCookies = candidateCookies;
+                    if (!TextUtils.isEmpty(candidateMainUrl)) {
+                        chosenTargetUrl = candidateMainUrl;
+                    } else {
+                        chosenTargetUrl = candidateRootUrl;
+                    }
+                    break;
+                }
             }
-            cookieManager.setCookie(targetUrl, cookies);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                cookieManager.flush();
+
+            if (TextUtils.isEmpty(selectedCookies)) {
+                String sourceCookies = cookieManager.getCookie(sourceUrl);
+                selectedCookies = CookieProfileManager.selectPersistedCookiesForPage(fallbackTargetUri, sourceCookies);
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to copy cookies during redirect: " + sourceUrl + " -> " + targetUrl, e);
+            Log.e(TAG, "Failed to inspect cookies for redirect: " + sourceUrl, e);
+        }
+
+        final String finalTargetUrl = chosenTargetUrl;
+        final String finalCookies = selectedCookies;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            cookieManager.removeAllCookies(value -> {
+                applyRedirectCookies(cookieManager, finalTargetUrl, finalCookies);
+                loadUrl(finalTargetUrl);
+            });
+            cookieManager.flush();
+        } else {
+            cookieManager.removeAllCookie();
+            cookieManager.removeSessionCookie();
+            applyRedirectCookies(cookieManager, finalTargetUrl, finalCookies);
+            loadUrl(finalTargetUrl);
+        }
+    }
+
+    private void applyRedirectCookies(CookieManager cookieManager, String targetUrl, String cookies) {
+        if (cookieManager == null || TextUtils.isEmpty(targetUrl) || TextUtils.isEmpty(cookies)) {
+            return;
+        }
+        Uri targetUri = Uri.parse(targetUrl);
+        String targetRootUrl = CookieProfileManager.buildRootUrl(targetUri);
+        for (String cookieEntry : CookieProfileManager.buildCookieApplicationList(cookies)) {
+            if (!TextUtils.isEmpty(targetRootUrl)) {
+                cookieManager.setCookie(targetRootUrl, cookieEntry);
+            }
+            cookieManager.setCookie(targetUrl, cookieEntry);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            cookieManager.flush();
         }
     }
 
@@ -1263,7 +1316,9 @@ final class FeaturePanelDialogController {
     private Button pauseResumeButton;
     private Button cancelButton;
     private CheckBox dailyDutyCheckBox;
+    private CheckBox fullSweepCheckBox;
     private Button dailyDutyRunButton;
+    private Button fullSweepRunButton;
     private Button startSelectedButton;
     private Button storageAccessButton;
     private TextView repositoryHintText;
@@ -1376,7 +1431,9 @@ final class FeaturePanelDialogController {
         pauseResumeButton = dialogView.findViewById(R.id.btn_panel_pause_resume);
         cancelButton = dialogView.findViewById(R.id.btn_panel_cancel);
         dailyDutyCheckBox = dialogView.findViewById(R.id.check_panel_daily_duty);
+        fullSweepCheckBox = dialogView.findViewById(R.id.check_panel_duty_full_sweep);
         dailyDutyRunButton = dialogView.findViewById(R.id.btn_panel_daily_duty_run);
+        fullSweepRunButton = dialogView.findViewById(R.id.btn_panel_duty_full_sweep_run);
         startSelectedButton = dialogView.findViewById(R.id.btn_panel_start_selected);
         storageAccessButton = dialogView.findViewById(R.id.btn_panel_request_storage_access);
         repositoryHintText = dialogView.findViewById(R.id.text_panel_repository_hint);
@@ -1411,6 +1468,7 @@ final class FeaturePanelDialogController {
                 pauseResumeButton,
                 cancelButton,
                 dailyDutyRunButton,
+                fullSweepRunButton,
                 startSelectedButton
         );
         repositoryController.bind(
@@ -1433,11 +1491,14 @@ final class FeaturePanelDialogController {
         requestIntervalInput.setText(String.valueOf(taskController.getSavedRequestInterval()));
         frequentRetryIntervalInput.setText(String.valueOf(taskController.getSavedFrequentRetryInterval()));
         dailyDutyCheckBox.setChecked(preferenceStore.isPanelDailyDutyEnabled());
+        fullSweepCheckBox.setChecked(preferenceStore.isPanelDutyFullSweepEnabled());
     }
 
     private void bindActions() {
         dailyDutyCheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
                 preferenceStore.setPanelDailyDutyEnabled(isChecked));
+        fullSweepCheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setPanelDutyFullSweepEnabled(isChecked));
         tabCookieButton.setOnClickListener(v -> switchTab(TAB_COOKIE));
         tabBasicButton.setOnClickListener(v -> switchTab(TAB_BASIC));
         tabRepositoryButton.setOnClickListener(v -> switchTab(TAB_REPOSITORY));
@@ -1467,8 +1528,11 @@ final class FeaturePanelDialogController {
             }
         });
         cancelButton.setOnClickListener(v -> dutyRequestQueue.cancel());
-        dailyDutyRunButton.setOnClickListener(v -> startDailyDutyRequests(false));
-        startSelectedButton.setOnClickListener(v -> startDailyDutyRequests(true));
+        dailyDutyRunButton.setOnClickListener(v ->
+                startTaskRequests(false, FeaturePanelTaskController.TaskMode.DAILY_DUTY));
+        fullSweepRunButton.setOnClickListener(v ->
+                startTaskRequests(false, FeaturePanelTaskController.TaskMode.FULL_SWEEP));
+        startSelectedButton.setOnClickListener(v -> startTaskRequests(true, null));
         storageAccessButton.setOnClickListener(v -> requestAllFilesAccessAction.run());
     }
 
@@ -1528,7 +1592,10 @@ final class FeaturePanelDialogController {
         uiController.switchTab(tab, TAB_COOKIE, TAB_BASIC, TAB_REPOSITORY, TAB_LOG);
     }
 
-    private void startDailyDutyRequests(boolean startCheckedItemsOnly) {
+    private void startTaskRequests(
+            boolean startCheckedItemsOnly,
+            FeaturePanelTaskController.TaskMode forcedTaskMode
+    ) {
         if (concurrencyInput == null
                 || requestIntervalInput == null
                 || frequentRetryIntervalInput == null) {
@@ -1540,12 +1607,21 @@ final class FeaturePanelDialogController {
         }
 
         boolean dailyDutyChecked = dailyDutyCheckBox != null && dailyDutyCheckBox.isChecked();
+        boolean fullSweepChecked = fullSweepCheckBox != null && fullSweepCheckBox.isChecked();
+        if (forcedTaskMode == FeaturePanelTaskController.TaskMode.DAILY_DUTY) {
+            dailyDutyChecked = true;
+            fullSweepChecked = false;
+        } else if (forcedTaskMode == FeaturePanelTaskController.TaskMode.FULL_SWEEP) {
+            dailyDutyChecked = false;
+            fullSweepChecked = true;
+        }
         FeaturePanelTaskController.BuildResult buildResult = taskController.buildStartRequest(
                 featureCookieChoices,
                 concurrencyInput.getText().toString(),
                 requestIntervalInput.getText().toString(),
                 frequentRetryIntervalInput.getText().toString(),
                 dailyDutyChecked,
+                fullSweepChecked,
                 startCheckedItemsOnly
         );
         concurrencyInput.setText(String.valueOf(taskController.getSavedConcurrency()));
@@ -1561,7 +1637,8 @@ final class FeaturePanelDialogController {
                 request.targets,
                 request.concurrency,
                 request.requestIntervalMs,
-                request.frequentRetryIntervalMs
+                request.frequentRetryIntervalMs,
+                request.taskMode == FeaturePanelTaskController.TaskMode.FULL_SWEEP
         );
     }
 
@@ -1584,7 +1661,9 @@ final class FeaturePanelDialogController {
         pauseResumeButton = null;
         cancelButton = null;
         dailyDutyCheckBox = null;
+        fullSweepCheckBox = null;
         dailyDutyRunButton = null;
+        fullSweepRunButton = null;
         startSelectedButton = null;
         storageAccessButton = null;
         repositoryHintText = null;
@@ -4501,8 +4580,42 @@ final class ClipboardCookieImportController {
         TextView messageView = dialogView.findViewById(R.id.text_cookie_editor_message);
         EditText fileNameEdit = dialogView.findViewById(R.id.edit_cookie_file_name);
         EditText userNameEdit = dialogView.findViewById(R.id.edit_cookie_user_name);
+        View serverSelectionLayout = dialogView.findViewById(R.id.layout_cookie_server_selection);
+        Spinner serverSpinner = dialogView.findViewById(R.id.spinner_cookie_server);
+        EditText serverNumberEdit = dialogView.findViewById(R.id.edit_cookie_server_number);
         messageView.setVisibility(View.VISIBLE);
-        messageView.setText(R.string.clipboard_cookie_detected_message);
+        boolean requiresServerSelection = importedProfile.requiresServerSelection;
+        messageView.setText(requiresServerSelection
+                ? R.string.clipboard_cookie_detected_message_select_server
+                : R.string.clipboard_cookie_detected_message);
+
+        if (requiresServerSelection) {
+            serverSelectionLayout.setVisibility(View.VISIBLE);
+            ArrayList<String> serverOptions = buildServerOptionLabels();
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                    activity,
+                    android.R.layout.simple_spinner_item,
+                    serverOptions
+            );
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            serverSpinner.setAdapter(adapter);
+            serverSpinner.setSelection(0, false);
+            serverSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                    if (position > 0) {
+                        serverNumberEdit.setText(serverOptions.get(position));
+                        serverNumberEdit.setSelection(serverNumberEdit.getText().length());
+                    }
+                }
+
+                @Override
+                public void onNothingSelected(android.widget.AdapterView<?> parent) {
+                }
+            });
+        } else {
+            serverSelectionLayout.setVisibility(View.GONE);
+        }
 
         String defaultName = TextUtils.isEmpty(importedProfile.userName)
                 ? cookieProfileManager.buildDefaultProfileName()
@@ -4517,16 +4630,38 @@ final class ClipboardCookieImportController {
                 .setTitle(R.string.clipboard_cookie_detected_title)
                 .setView(dialogView)
                 .setNegativeButton(android.R.string.cancel, (dialog, which) -> lastDismissedSignature = signature)
-                .setPositiveButton(R.string.clipboard_cookie_confirm_save, (dialog, which) -> {
-                    accepted[0] = true;
-                    handleConfirmedImport(
-                            importedProfile,
-                            signature,
-                            fileNameEdit.getText().toString(),
-                            userNameEdit.getText().toString()
-                    );
-                })
+                .setPositiveButton(R.string.clipboard_cookie_confirm_save, null)
                 .create();
+        confirmDialog.setOnShowListener(dialog -> {
+            Button positiveButton = confirmDialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            positiveButton.setOnClickListener(v -> {
+                CookieProfileManager.ImportedProfile resolvedProfile = importedProfile;
+                if (requiresServerSelection) {
+                    int serverNumber = resolveClipboardServerNumber(
+                            serverSpinner,
+                            serverNumberEdit.getText().toString()
+                    );
+                    if (serverNumber < 1 || serverNumber > 46) {
+                        Toast.makeText(activity, R.string.clipboard_cookie_server_invalid, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String userDomain = CookieProfileManager.buildServerRootUrlFromLegacySubdomain("s" + serverNumber);
+                    if (TextUtils.isEmpty(userDomain)) {
+                        Toast.makeText(activity, R.string.clipboard_cookie_server_invalid, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    resolvedProfile = importedProfile.withUserDomain(userDomain);
+                }
+                accepted[0] = true;
+                handleConfirmedImport(
+                        resolvedProfile,
+                        signature,
+                        fileNameEdit.getText().toString(),
+                        userNameEdit.getText().toString()
+                );
+                confirmDialog.dismiss();
+            });
+        });
         confirmDialog.setOnDismissListener(dialog -> {
             if (!accepted[0]) {
                 lastDismissedSignature = signature;
@@ -4577,6 +4712,38 @@ final class ClipboardCookieImportController {
                 activity.getString(R.string.clipboard_cookie_saved, savedFile.getName()),
                 Toast.LENGTH_LONG
         ).show();
+    }
+
+    private ArrayList<String> buildServerOptionLabels() {
+        ArrayList<String> options = new ArrayList<>(47);
+        options.add(activity.getString(R.string.clipboard_cookie_server_select));
+        for (int server = 1; server <= 46; server += 1) {
+            options.add(String.valueOf(server));
+        }
+        return options;
+    }
+
+    private int resolveClipboardServerNumber(Spinner serverSpinner, String manualInput) {
+        String normalizedManual = manualInput == null ? "" : manualInput.replaceAll("[^0-9]", "").trim();
+        if (!TextUtils.isEmpty(normalizedManual)) {
+            try {
+                return Integer.parseInt(normalizedManual);
+            } catch (NumberFormatException ignored) {
+                return -1;
+            }
+        }
+        if (serverSpinner == null || serverSpinner.getSelectedItemPosition() <= 0) {
+            return -1;
+        }
+        Object selected = serverSpinner.getSelectedItem();
+        if (!(selected instanceof String)) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(((String) selected).trim());
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
     }
 
     private String buildSignature(String text) {

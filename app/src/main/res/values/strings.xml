@@ -46,8 +46,13 @@
     <string name="cookie_import_need_permission">需要存储权限才能导入 Cookie 文件</string>
     <string name="clipboard_cookie_detected_title">检测到剪切板 Cookie</string>
     <string name="clipboard_cookie_detected_message">检测到剪切板中存在符合规则的 Cookie 配置文本，是否保存到本地？</string>
+    <string name="clipboard_cookie_detected_message_select_server">检测到剪切板中存在符合规则的最小 Cookie 文本。保存前请选择对应区服。</string>
     <string name="clipboard_cookie_confirm_save">保存</string>
     <string name="clipboard_cookie_saved">Cookie 已保存：%1$s</string>
     <string name="clipboard_cookie_save_failed">保存剪切板 Cookie 失败</string>
     <string name="clipboard_cookie_access_denied">当前还不能读取剪切板，稍后会再次检测</string>
+    <string name="clipboard_cookie_server_label">选择或输入区服</string>
+    <string name="clipboard_cookie_server_hint">输入 1-46 区</string>
+    <string name="clipboard_cookie_server_select">下拉选择区服</string>
+    <string name="clipboard_cookie_server_invalid">请输入 1-46 之间的区服</string>
 </resources>

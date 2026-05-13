@@ -16,6 +16,8 @@ import java.util.concurrent.ExecutorService;
 
 final class DutyRequestQueue {
     private static final int CLAIM_BLOCK_INTERVAL_MS = 14000;
+    private static final List<PvzolAmfClient.RewardRequest> FULL_SWEEP_REWARD_REQUESTS =
+            PvzolAmfClient.buildFullSweepRewardRequests();
 
     interface Listener {
         void onQueueUpdated(StateSnapshot snapshot);
@@ -115,7 +117,8 @@ final class DutyRequestQueue {
             List<CookieTarget> targets,
             int concurrency,
             int requestIntervalMs,
-            int frequentRetryIntervalMs
+            int frequentRetryIntervalMs,
+            boolean fullSweepMode
     ) {
         synchronized (lock) {
             if (running || paused || cancelling) {
@@ -139,6 +142,7 @@ final class DutyRequestQueue {
             cancelling = false;
             paused = false;
 
+            int eligibleTargetCount = 0;
             for (CookieTarget target : targets) {
                 if (target == null || TextUtils.isEmpty(target.baseUrl) || TextUtils.isEmpty(target.cookies)) {
                     skipped += 1;
@@ -149,8 +153,16 @@ final class DutyRequestQueue {
                     appendLogLocked("Skip " + target.label + ": base URL contains pvzol.org");
                     continue;
                 }
-                pendingTasks.add(RequestTask.discovery(target));
-                total += 1;
+                eligibleTargetCount += 1;
+                if (fullSweepMode) {
+                    for (PvzolAmfClient.RewardRequest rewardRequest : FULL_SWEEP_REWARD_REQUESTS) {
+                        pendingTasks.add(RequestTask.reward(target, rewardRequest.rewardId, rewardRequest.category));
+                        total += 1;
+                    }
+                } else {
+                    pendingTasks.add(RequestTask.discovery(target));
+                    total += 1;
+                }
             }
 
             if (total <= 0) {
@@ -160,7 +172,9 @@ final class DutyRequestQueue {
             }
 
             running = true;
-            appendLogLocked("Queue started. targets=" + total
+            appendLogLocked("Queue started. mode=" + (fullSweepMode ? "full-sweep" : "daily-duty")
+                    + ", targets=" + eligibleTargetCount
+                    + ", requests=" + total
                     + ", concurrency=" + Math.max(1, concurrency)
                     + ", interval=" + this.requestIntervalMs + "ms"
                     + ", frequentInterval=" + this.frequentRetryIntervalMs + "ms");
@@ -341,7 +355,15 @@ final class DutyRequestQueue {
             }
 
             PvzolAmfClient.DutyTaskPlan plan = PvzolAmfClient.planDutyRewardRequests(response.decodedValue);
-            if (!plan.hasMainTask) {
+            if (!plan.hasAnyTaskSection) {
+                synchronized (lock) {
+                    failed += 1;
+                    appendLogLocked("Failed to fetch task list for " + task.target.label
+                            + ": no task sections found.");
+                }
+                return;
+            }
+            if (!plan.hasMainTask && plan.rewardRequests.isEmpty()) {
                 synchronized (lock) {
                     skipped += 1;
                     appendLogLocked("No mainTask found for " + task.target.label + ", skip rewards.");

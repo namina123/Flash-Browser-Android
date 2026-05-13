@@ -7,18 +7,26 @@ import java.util.LinkedHashMap;
 import java.util.List;
 
 final class FeaturePanelTaskController {
+    enum TaskMode {
+        DAILY_DUTY,
+        FULL_SWEEP
+    }
+
     static final class StartRequest {
+        final TaskMode taskMode;
         final int concurrency;
         final int requestIntervalMs;
         final int frequentRetryIntervalMs;
         final List<DutyRequestQueue.CookieTarget> targets;
 
         StartRequest(
+                TaskMode taskMode,
                 int concurrency,
                 int requestIntervalMs,
                 int frequentRetryIntervalMs,
                 List<DutyRequestQueue.CookieTarget> targets
         ) {
+            this.taskMode = taskMode;
             this.concurrency = concurrency;
             this.requestIntervalMs = requestIntervalMs;
             this.frequentRetryIntervalMs = frequentRetryIntervalMs;
@@ -60,6 +68,7 @@ final class FeaturePanelTaskController {
             String requestIntervalValue,
             String frequentRetryIntervalValue,
             boolean dailyDutyChecked,
+            boolean fullSweepChecked,
             boolean startCheckedItemsOnly
     ) {
         int concurrency = parsePositiveInt(concurrencyValue, getSavedConcurrency());
@@ -73,7 +82,8 @@ final class FeaturePanelTaskController {
         preferenceStore.setPanelRequestInterval(requestIntervalMs);
         preferenceStore.setPanelFrequentRetryInterval(frequentRetryIntervalMs);
 
-        if (startCheckedItemsOnly && !dailyDutyChecked) {
+        TaskMode taskMode = resolveTaskMode(dailyDutyChecked, fullSweepChecked);
+        if (startCheckedItemsOnly && taskMode == null) {
             return new BuildResult("No task selected.", null);
         }
 
@@ -99,12 +109,23 @@ final class FeaturePanelTaskController {
         return new BuildResult(
                 null,
                 new StartRequest(
+                        taskMode == null ? TaskMode.DAILY_DUTY : taskMode,
                         concurrency,
                         requestIntervalMs,
                         frequentRetryIntervalMs,
                         new ArrayList<>(deduplicatedTargets.values())
                 )
         );
+    }
+
+    private TaskMode resolveTaskMode(boolean dailyDutyChecked, boolean fullSweepChecked) {
+        if (fullSweepChecked) {
+            return TaskMode.FULL_SWEEP;
+        }
+        if (dailyDutyChecked) {
+            return TaskMode.DAILY_DUTY;
+        }
+        return null;
     }
 
     private int parsePositiveInt(String value, int fallback) {

@@ -48,6 +48,7 @@ final class CookieProfileManager {
     private static final String LEGACY_YOUKIA_HOST = "www.youkia.com";
     private static final String LEGACY_YOUKIA_PREFIX = "/pvz/";
     private static final String LEGACY_YOUKIA_INDEX_PREFIX = "/index.php/pvz/";
+    private static final String LEGACY_YOUKIA_ENTRANCE_PATH = "/index.php/entrance/entrance";
     private static final Pattern LEGACY_SERVER_SUBDOMAIN_PATTERN =
             Pattern.compile("^s(\\d+)$", Pattern.CASE_INSENSITIVE);
     private static final Pattern SPECIAL_SERVER_HOST_PATTERN_A =
@@ -58,6 +59,8 @@ final class CookieProfileManager {
             new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US);
     private static final Pattern USER_SETTING_BLOCK_PATTERN =
             Pattern.compile("(?is)<UserSetting\\b[^>]*>.*?</UserSetting>");
+    private static final Pattern CLIPBOARD_MINIMAL_COOKIE_PATTERN =
+            Pattern.compile("(?i)(PHPSESSID|pvz_youkia_new1)\\s*=\\s*([^;\\s<>\"]+)");
     private static final int MAX_IMPORT_BYTES = 30 * 1024 * 1024;
 
     private final Context context;
@@ -262,6 +265,36 @@ final class CookieProfileManager {
             return null;
         }
         return Uri.parse(rootUrl).buildUpon().encodedPath(TARGET_PATH).build().toString();
+    }
+
+    static List<String> buildCandidateGameRootUrlsForLegacyPage(Uri uri) {
+        if (!isLegacyYoukiaLandingPage(uri)) {
+            return Collections.emptyList();
+        }
+        String subdomain = extractLegacyYoukiaSubdomain(uri);
+        if (TextUtils.isEmpty(subdomain)) {
+            return Collections.emptyList();
+        }
+
+        ArrayList<String> candidates = new ArrayList<>(2);
+        String preferred = buildServerRootUrlFromLegacySubdomain(subdomain);
+        if (!TextUtils.isEmpty(preferred)) {
+            candidates.add(preferred);
+        }
+
+        int serverNumber = parseServerNumber(subdomain);
+        if (serverNumber > 0) {
+            String alternate;
+            if (serverNumber <= 12) {
+                alternate = "http://s" + serverNumber + ".youkia.pvz.youkia.com";
+            } else {
+                alternate = "http://pvz-s" + serverNumber + ".youkia.com";
+            }
+            if (!TextUtils.isEmpty(alternate) && !candidates.contains(alternate)) {
+                candidates.add(alternate);
+            }
+        }
+        return Collections.unmodifiableList(candidates);
     }
 
     static boolean isDutyRewardEligibleBaseUrl(String baseUrl) {
@@ -539,7 +572,9 @@ final class CookieProfileManager {
         }
         String path = safeLower(uri.getPath());
         return LEGACY_YOUKIA_HOST.equals(safeLower(uri.getHost()))
-                && (path.startsWith(LEGACY_YOUKIA_PREFIX) || path.startsWith(LEGACY_YOUKIA_INDEX_PREFIX));
+                && (path.startsWith(LEGACY_YOUKIA_PREFIX)
+                || path.startsWith(LEGACY_YOUKIA_INDEX_PREFIX)
+                || LEGACY_YOUKIA_ENTRANCE_PATH.equals(path));
     }
 
     static String extractLegacyYoukiaSubdomain(Uri uri) {
@@ -547,8 +582,40 @@ final class CookieProfileManager {
             return null;
         }
 
-        List<String> segments = uri.getPathSegments();
         String path = safeLower(uri.getPath());
+        if (LEGACY_YOUKIA_ENTRANCE_PATH.equals(path)) {
+            String nestedUrl = uri.getQueryParameter("url");
+            if (!TextUtils.isEmpty(nestedUrl)) {
+                try {
+                    Uri nestedUri = Uri.parse(nestedUrl);
+                    String queryServer = nestedUri.getQueryParameter("s");
+                    String normalizedQueryServer = normalizeLegacyServerToken(queryServer);
+                    if (!TextUtils.isEmpty(normalizedQueryServer)) {
+                        return normalizedQueryServer;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+
+            String directServer = normalizeLegacyServerToken(uri.getQueryParameter("s"));
+            if (!TextUtils.isEmpty(directServer)) {
+                return directServer;
+            }
+
+            String sid = uri.getQueryParameter("sid");
+            if (!TextUtils.isEmpty(sid)) {
+                try {
+                    int serverNumber = Integer.parseInt(sid.trim());
+                    if (serverNumber > 0) {
+                        return "s" + serverNumber;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            return null;
+        }
+
+        List<String> segments = uri.getPathSegments();
         int subdomainIndex = path.startsWith(LEGACY_YOUKIA_INDEX_PREFIX) ? 2 : 1;
         if (segments.size() <= subdomainIndex) {
             return null;
@@ -824,6 +891,24 @@ final class CookieProfileManager {
         }
     }
 
+    private static String normalizeLegacyServerToken(String value) {
+        if (TextUtils.isEmpty(value)) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        Matcher matcher = LEGACY_SERVER_SUBDOMAIN_PATTERN.matcher(trimmed);
+        if (matcher.matches()) {
+            return "s" + matcher.group(1);
+        }
+        if (trimmed.matches("^\\d+$")) {
+            return "s" + trimmed;
+        }
+        return null;
+    }
+
     private static void addUniqueCookieEntry(List<String> target, String entry) {
         String key = safeLower(getCookieKey(entry));
         String value = safeLower(getCookieValue(entry));
@@ -881,7 +966,51 @@ final class CookieProfileManager {
     private List<ImportedProfileParser> createImportedProfileParsers() {
         ArrayList<ImportedProfileParser> parsers = new ArrayList<>();
         parsers.add(this::parseImportedXmlText);
+        parsers.add(this::parseImportedMinimalCookieText);
         return Collections.unmodifiableList(parsers);
+    }
+
+    private ImportedProfile parseImportedMinimalCookieText(String rawText) {
+        if (TextUtils.isEmpty(rawText)) {
+            return null;
+        }
+
+        ArrayList<String> phpSessions = new ArrayList<>();
+        ArrayList<String> pvzYoukiaEntries = new ArrayList<>();
+        Matcher matcher = CLIPBOARD_MINIMAL_COOKIE_PATTERN.matcher(rawText);
+        while (matcher.find()) {
+            String key = matcher.group(1);
+            String value = matcher.group(2);
+            if (TextUtils.isEmpty(key) || TextUtils.isEmpty(value)) {
+                continue;
+            }
+
+            String normalizedEntry;
+            if (COOKIE_KEY_PHPSESSID.equalsIgnoreCase(key)) {
+                normalizedEntry = COOKIE_KEY_PHPSESSID + "=" + value.trim();
+                addUniqueCookieEntry(phpSessions, normalizedEntry);
+            } else if (COOKIE_KEY_PVZ_YOUKIA_NEW1.equalsIgnoreCase(key)) {
+                normalizedEntry = COOKIE_KEY_PVZ_YOUKIA_NEW1 + "=" + value.trim();
+                addUniqueCookieEntry(pvzYoukiaEntries, normalizedEntry);
+            }
+        }
+
+        if (phpSessions.isEmpty() || pvzYoukiaEntries.isEmpty()) {
+            return null;
+        }
+
+        ArrayList<String> persistedEntries = new ArrayList<>(phpSessions.size() + pvzYoukiaEntries.size());
+        persistedEntries.addAll(phpSessions);
+        persistedEntries.addAll(pvzYoukiaEntries);
+        return new ImportedProfile(
+                1,
+                null,
+                null,
+                TextUtils.join("; ", persistedEntries),
+                1,
+                "minimal_cookie_pair",
+                true
+        );
     }
 
     private ImportedProfile parseImportedXmlText(String rawText) throws Exception {
@@ -954,7 +1083,8 @@ final class CookieProfileManager {
                 fields.userDomain.trim(),
                 normalizedCookies.trim(),
                 Math.max(1, fields.userLevel),
-                "xml"
+                "xml",
+                false
         );
     }
 
@@ -1072,6 +1202,7 @@ final class CookieProfileManager {
         final String userCookies;
         final int userLevel;
         final String sourceFormat;
+        final boolean requiresServerSelection;
 
         ImportedProfile(
                 int userId,
@@ -1079,7 +1210,8 @@ final class CookieProfileManager {
                 String userDomain,
                 String userCookies,
                 int userLevel,
-                String sourceFormat
+                String sourceFormat,
+                boolean requiresServerSelection
         ) {
             this.userId = userId;
             this.userName = userName;
@@ -1087,6 +1219,19 @@ final class CookieProfileManager {
             this.userCookies = userCookies;
             this.userLevel = userLevel;
             this.sourceFormat = sourceFormat;
+            this.requiresServerSelection = requiresServerSelection;
+        }
+
+        ImportedProfile withUserDomain(String resolvedUserDomain) {
+            return new ImportedProfile(
+                    userId,
+                    userName,
+                    resolvedUserDomain,
+                    userCookies,
+                    userLevel,
+                    sourceFormat,
+                    false
+            );
         }
     }
 
@@ -1200,7 +1345,8 @@ final class CookieProfileManager {
                     userDomain,
                     cookies,
                     Math.max(1, userLevel),
-                    "xml"
+                    "xml",
+                    false
             );
         }
 

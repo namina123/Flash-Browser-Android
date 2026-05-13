@@ -110,10 +110,12 @@ final class PvzolAmfClient {
 
     static final class DutyTaskPlan {
         final boolean hasMainTask;
+        final boolean hasAnyTaskSection;
         final List<RewardRequest> rewardRequests;
 
-        DutyTaskPlan(boolean hasMainTask, List<RewardRequest> rewardRequests) {
+        DutyTaskPlan(boolean hasMainTask, boolean hasAnyTaskSection, List<RewardRequest> rewardRequests) {
             this.hasMainTask = hasMainTask;
+            this.hasAnyTaskSection = hasAnyTaskSection;
             this.rewardRequests = rewardRequests;
         }
     }
@@ -151,15 +153,20 @@ final class PvzolAmfClient {
 
     static DutyTaskPlan planDutyRewardRequests(Object decodedValue) {
         Object mainTaskValue = findFirstByKey(decodedValue, "mainTask");
-        if (mainTaskValue == null) {
-            return new DutyTaskPlan(false, Collections.emptyList());
-        }
-
         Object sideTaskValue = findFirstByKey(decodedValue, "sideTask");
+        boolean hasAnyTaskSection = mainTaskValue != null || sideTaskValue != null;
+        if (!hasAnyTaskSection) {
+            return new DutyTaskPlan(false, false, Collections.emptyList());
+        }
         LinkedHashSet<Integer> rewardIds = new LinkedHashSet<>();
 
-        addMainTaskRewards(mainTaskValue, MAIN_TASK_RANGES[0][0], MAIN_TASK_RANGES[0][1], rewardIds);
-        addMainTaskRewards(mainTaskValue, MAIN_TASK_RANGES[1][0], MAIN_TASK_RANGES[1][1], rewardIds);
+        if (mainTaskValue == null) {
+            addRange(rewardIds, MAIN_TASK_RANGES[0][0], MAIN_TASK_RANGES[0][1]);
+            addRange(rewardIds, MAIN_TASK_RANGES[1][0], MAIN_TASK_RANGES[1][1]);
+        } else {
+            addMainTaskRewards(mainTaskValue, MAIN_TASK_RANGES[0][0], MAIN_TASK_RANGES[0][1], rewardIds);
+            addMainTaskRewards(mainTaskValue, MAIN_TASK_RANGES[1][0], MAIN_TASK_RANGES[1][1], rewardIds);
+        }
 
         for (int i = 0; i < SIDE_TASK_RANGES.length; i += 1) {
             int[] range = SIDE_TASK_RANGES[i];
@@ -170,7 +177,19 @@ final class PvzolAmfClient {
         for (Integer rewardId : rewardIds) {
             rewardRequests.add(new RewardRequest(rewardId.intValue(), 3));
         }
-        return new DutyTaskPlan(true, Collections.unmodifiableList(rewardRequests));
+        return new DutyTaskPlan(
+                mainTaskValue != null,
+                true,
+                Collections.unmodifiableList(rewardRequests)
+        );
+    }
+
+    static List<RewardRequest> buildFullSweepRewardRequests() {
+        ArrayList<RewardRequest> rewardRequests = new ArrayList<>(77);
+        for (int rewardId = 1; rewardId <= 77; rewardId += 1) {
+            rewardRequests.add(new RewardRequest(rewardId, 3));
+        }
+        return Collections.unmodifiableList(rewardRequests);
     }
 
     static Response postRpc(String baseUrl, String target, int[] arguments, String cookies, ActiveCall call)
@@ -285,7 +304,7 @@ final class PvzolAmfClient {
             }
             for (Map.Entry<String, Object> entry : object.entrySet()) {
                 Integer keyId = extractIdIfInRange(entry.getKey(), startInclusive, endInclusive);
-                if (keyId != null) {
+                if (keyId != null && isMeaningfulTaskNode(entry.getValue())) {
                     return keyId;
                 }
                 Object child = entry.getValue();
@@ -304,7 +323,7 @@ final class PvzolAmfClient {
             }
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 Integer keyId = extractIdIfInRange(entry.getKey(), startInclusive, endInclusive);
-                if (keyId != null) {
+                if (keyId != null && isMeaningfulTaskNode(entry.getValue())) {
                     return keyId;
                 }
                 Object child = entry.getValue();
@@ -334,7 +353,39 @@ final class PvzolAmfClient {
                 }
             }
         }
-        return extractIdIfInRange(value, startInclusive, endInclusive);
+        return null;
+    }
+
+    private static boolean isMeaningfulTaskNode(Object value) {
+        if (value == null) {
+            return false;
+        }
+        if (value instanceof Amf3Object) {
+            return isMeaningfulTaskNode(((Amf3Object) value).getValue());
+        }
+        if (value instanceof Boolean) {
+            return ((Boolean) value).booleanValue();
+        }
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue() != 0d;
+        }
+        if (value instanceof CharSequence) {
+            return !TextUtils.isEmpty(value.toString().trim());
+        }
+        if (value instanceof Collection<?>) {
+            return !((Collection<?>) value).isEmpty();
+        }
+        if (value instanceof Map<?, ?>) {
+            return !((Map<?, ?>) value).isEmpty();
+        }
+        if (value instanceof AsObject) {
+            return !((AsObject) value).isEmpty();
+        }
+        Class<?> valueClass = value.getClass();
+        if (valueClass.isArray()) {
+            return Array.getLength(value) > 0;
+        }
+        return true;
     }
 
     private static Integer extractIdIfInRange(Object value, int startInclusive, int endInclusive) {

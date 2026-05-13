@@ -19,6 +19,7 @@ final class FeaturePanelUiController {
     private Button pauseResumeButton;
     private Button cancelButton;
     private Button dailyDutyRunButton;
+    private Button fullSweepRunButton;
     private Button startSelectedButton;
 
     void bind(
@@ -35,6 +36,7 @@ final class FeaturePanelUiController {
             Button pauseResumeButton,
             Button cancelButton,
             Button dailyDutyRunButton,
+            Button fullSweepRunButton,
             Button startSelectedButton
     ) {
         this.tabCookieButton = tabCookieButton;
@@ -50,11 +52,12 @@ final class FeaturePanelUiController {
         this.pauseResumeButton = pauseResumeButton;
         this.cancelButton = cancelButton;
         this.dailyDutyRunButton = dailyDutyRunButton;
+        this.fullSweepRunButton = fullSweepRunButton;
         this.startSelectedButton = startSelectedButton;
     }
 
     void clear() {
-        bind(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        bind(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     void switchTab(int tab, int cookieTab, int basicTab, int repositoryTab, int logTab) {
@@ -130,6 +133,9 @@ final class FeaturePanelUiController {
         boolean idle = !snapshot.running && !snapshot.paused && !snapshot.cancelling;
         if (dailyDutyRunButton != null) {
             dailyDutyRunButton.setEnabled(idle);
+        }
+        if (fullSweepRunButton != null) {
+            fullSweepRunButton.setEnabled(idle);
         }
         if (startSelectedButton != null) {
             startSelectedButton.setEnabled(idle);
