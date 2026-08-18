@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <LinearLayout
+        android:id="@+id/browser_chrome"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#f3f4f6"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/top_bar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#e5e7eb"
+            android:gravity="center_vertical"
+            android:minHeight="52dp"
+            android:orientation="horizontal"
+            android:paddingStart="6dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="6dp"
+            android:paddingBottom="6dp">
+
+            <ImageButton
+                android:id="@+id/btn_back"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/back"
+                android:padding="8dp"
+                android:src="@drawable/ic_arrow_back" />
+
+            <ImageButton
+                android:id="@+id/btn_forward"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/forward"
+                android:padding="8dp"
+                android:src="@drawable/ic_arrow_forward" />
+
+            <ImageButton
+                android:id="@+id/btn_refresh"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/refresh"
+                android:padding="8dp"
+                android:src="@drawable/ic_refresh" />
+
+            <EditText
+                android:id="@+id/input_url"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:background="#ffffff"
+                android:hint="@string/url_hint"
+                android:imeOptions="actionGo"
+                android:inputType="textUri"
+                android:maxLines="1"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:singleLine="true"
+                android:textColor="#111827"
+                android:textColorHint="#6b7280" />
+
+            <ImageButton
+                android:id="@+id/btn_go"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="功能面板"
+                android:padding="8dp"
+                android:src="@android:drawable/ic_menu_more" />
+
+            <ImageButton
+                android:id="@+id/btn_fullscreen"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Ruffle fullscreen"
+                android:padding="8dp"
+                android:src="@drawable/ic_fullscreen" />
+
+            <ImageButton
+                android:id="@+id/btn_save_cookie"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Save cookie"
+                android:padding="8dp"
+                android:src="@android:drawable/ic_menu_save" />
+
+            <ImageButton
+                android:id="@+id/btn_settings"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/settings"
+                android:padding="8dp"
+                android:src="@android:drawable/ic_menu_manage" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/progress_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="3dp"
+            android:indeterminate="false"
+            android:max="100"
+            android:progress="0" />
+
+        <WebView
+            android:id="@+id/web_view"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/fullscreen_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:visibility="gone" />
+
+    <ImageButton
+        android:id="@+id/btn_rotate_fullscreen"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="64dp"
+        android:background="#66000000"
+        android:contentDescription="Rotate fullscreen"
+        android:padding="10dp"
+        android:src="@drawable/ic_rotate_screen"
+        android:tint="#ffffff"
+        android:visibility="gone" />
+
+    <ImageButton
+        android:id="@+id/btn_exit_fullscreen"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="12dp"
+        android:background="#66000000"
+        android:contentDescription="Exit fullscreen"
+        android:padding="10dp"
+        android:src="@android:drawable/ic_menu_close_clear_cancel"
+        android:tint="#ffffff"
+        android:visibility="gone" />
+
+    <ImageButton
+        android:id="@+id/btn_feature_panel_fullscreen"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="116dp"
+        android:background="#66000000"
+        android:contentDescription="Feature panel"
+        android:padding="10dp"
+        android:src="@android:drawable/ic_menu_more"
+        android:tint="#ffffff"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/btn_legacy_youkia_redirect"
+        android:layout_width="wrap_content"
+        android:layout_height="44dp"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="18dp"
+        android:backgroundTint="#2563eb"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:text="跳转到游戏页"
+        android:textColor="#ffffff"
+        android:visibility="gone" />
+
+</FrameLayout>

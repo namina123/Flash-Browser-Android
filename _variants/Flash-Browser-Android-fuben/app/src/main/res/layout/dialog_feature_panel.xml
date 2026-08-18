@@ -1,0 +1,771 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#f3f4f6"
+    android:orientation="vertical">
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#e5e7eb"
+        android:fillViewport="true"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/panel_tab_container"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="10dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="10dp">
+
+            <Button
+                android:id="@+id/btn_panel_tab_cookie"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginEnd="8dp"
+                android:backgroundTint="#2563eb"
+                android:text="Cookie"
+                android:textColor="#ffffff" />
+
+            <Button
+                android:id="@+id/btn_panel_tab_basic"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginEnd="8dp"
+                android:backgroundTint="#9ca3af"
+                android:text="基础功能"
+                android:textColor="#ffffff" />
+
+            <Button
+                android:id="@+id/btn_panel_tab_repository"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginEnd="8dp"
+                android:backgroundTint="#9ca3af"
+                android:text="仓库记录"
+                android:textColor="#ffffff" />
+
+            <Button
+                android:id="@+id/btn_panel_tab_log"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:backgroundTint="#9ca3af"
+                android:text="请求日志"
+                android:textColor="#ffffff" />
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <ScrollView
+            android:id="@+id/panel_page_cookie"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:id="@+id/text_cookie_selection_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="优先显示当前页面 Cookie。每日任务会自动忽略 URL 中包含 pvzol.org 的选项。"
+                    android:textColor="#4b5563"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/btn_panel_select_all_cookies"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginTop="10dp"
+                    android:text="全选 Cookie" />
+
+                <LinearLayout
+                    android:id="@+id/panel_cookie_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="vertical" />
+
+                <Button
+                    android:id="@+id/btn_panel_request_storage_access"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginTop="10dp"
+                    android:text="授权访问 PVZOLcookies"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </ScrollView>
+
+        <ScrollView
+            android:id="@+id/panel_page_basic"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="并发数"
+                    android:textColor="#111827"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/input_panel_concurrency"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="8dp"
+                    android:background="#ffffff"
+                    android:ems="10"
+                    android:inputType="number"
+                    android:maxLines="1"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:textColor="#111827" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="请求间隔 (ms)"
+                    android:textColor="#111827"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/input_panel_request_interval"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="8dp"
+                    android:background="#ffffff"
+                    android:ems="10"
+                    android:inputType="number"
+                    android:maxLines="1"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:textColor="#111827" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="频繁请求间隔 (ms)"
+                    android:textColor="#111827"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/input_panel_frequent_retry_interval"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="8dp"
+                    android:background="#ffffff"
+                    android:ems="10"
+                    android:inputType="number"
+                    android:maxLines="1"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:textColor="#111827" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="14dp"
+                    android:layout_marginBottom="14dp"
+                    android:background="#d1d5db" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="请求队列控制"
+                    android:textColor="#111827"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btn_panel_pause_resume"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_marginEnd="8dp"
+                        android:layout_weight="1"
+                        android:text="暂停" />
+
+                    <Button
+                        android:id="@+id/btn_panel_cancel"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:text="终止" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="14dp"
+                    android:layout_marginBottom="14dp"
+                    android:background="#d1d5db" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="功能项"
+                    android:textColor="#111827"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#ffffff"
+                    android:elevation="1dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="12dp">
+
+                    <CheckBox
+                        android:id="@+id/check_panel_daily_duty"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="领取每日任务"
+                        android:textColor="#111827"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btn_panel_daily_duty_run"
+                        android:layout_width="wrap_content"
+                        android:layout_height="38dp"
+                        android:text="立即运行" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#ffffff"
+                    android:elevation="1dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="12dp">
+
+                    <CheckBox
+                        android:id="@+id/check_panel_duty_full_sweep"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="全任务直领"
+                        android:textColor="#111827"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btn_panel_duty_full_sweep_run"
+                        android:layout_width="wrap_content"
+                        android:layout_height="38dp"
+                        android:text="立即运行" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#ffffff"
+                    android:elevation="1dp"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="领取副本进度奖励"
+                            android:textColor="#111827"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/btn_panel_fuben_progress_settings"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:text="设置" />
+
+                        <Button
+                            android:id="@+id/btn_panel_fuben_progress_run"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:layout_marginStart="8dp"
+                            android:text="立即运行" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/layout_panel_fuben_progress_settings"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="每个选中的数字都会发送 4 次 integral 奖励请求。"
+                            android:textColor="#4b5563"
+                            android:textSize="13sp" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress_stage_1"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="1" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress_stage_2"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="2" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress_stage_3"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="3" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress_stage_4"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="4" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress_stage_5"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="5" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#ffffff"
+                    android:elevation="1dp"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <CheckBox
+                            android:id="@+id/check_panel_medal_repeat"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="重复领取勋章奖励"
+                            android:textColor="#111827"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/btn_panel_medal_repeat_settings"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:text="设置" />
+
+                        <Button
+                            android:id="@+id/btn_panel_medal_repeat_run"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:layout_marginStart="8dp"
+                            android:text="立即运行" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/layout_panel_medal_repeat_settings"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="每天第一次会先发 4 次 integral，请按副本单独设置最大领取范围。"
+                            android:textColor="#4b5563"
+                            android:textSize="13sp" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_medal_repeat_infinite"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="无限重复"
+                            android:textColor="#111827" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <CheckBox
+                                android:id="@+id/check_panel_medal_block_1"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:checked="false"
+                                android:text="副本 1" />
+
+                            <Spinner
+                                android:id="@+id/spinner_panel_medal_block_1_range"
+                                android:layout_width="120dp"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <CheckBox
+                                android:id="@+id/check_panel_medal_block_2"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:checked="false"
+                                android:text="副本 2" />
+
+                            <Spinner
+                                android:id="@+id/spinner_panel_medal_block_2_range"
+                                android:layout_width="120dp"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <CheckBox
+                                android:id="@+id/check_panel_medal_block_3"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:checked="false"
+                                android:text="副本 3" />
+
+                            <Spinner
+                                android:id="@+id/spinner_panel_medal_block_3_range"
+                                android:layout_width="120dp"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <CheckBox
+                                android:id="@+id/check_panel_medal_block_4"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:checked="false"
+                                android:text="副本 4" />
+
+                            <Spinner
+                                android:id="@+id/spinner_panel_medal_block_4_range"
+                                android:layout_width="120dp"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <CheckBox
+                                android:id="@+id/check_panel_medal_block_5"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:checked="false"
+                                android:text="副本 5" />
+
+                            <Spinner
+                                android:id="@+id/spinner_panel_medal_block_5_range"
+                                android:layout_width="120dp"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+
+        <ScrollView
+            android:id="@+id/panel_page_repository"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:id="@+id/text_panel_repository_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="仓库记录会按每个 Cookie 分开保存。请先在这里选择记录目标。"
+                    android:textColor="#4b5563"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/text_panel_repository_selected_targets"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="当前未选择记录目标"
+                    android:textColor="#111827"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btn_panel_repository_pick_targets"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginTop="8dp"
+                    android:text="选择记录 Cookie" />
+
+                <TextView
+                    android:id="@+id/text_panel_repository_view_cookie"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="当前未选择查看目标"
+                    android:textColor="#111827"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btn_panel_repository_pick_view_cookie"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginTop="8dp"
+                    android:text="选择查看 Cookie" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btn_panel_repository_refresh"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_marginEnd="8dp"
+                        android:layout_weight="1"
+                        android:text="刷新仓库" />
+
+                    <Button
+                        android:id="@+id/btn_panel_repository_record"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_marginEnd="8dp"
+                        android:layout_weight="1"
+                        android:text="记录" />
+
+                    <Button
+                        android:id="@+id/btn_panel_repository_compare"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:text="对比" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="原有"
+                    android:textColor="#111827"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/panel_repository_current_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="对比"
+                    android:textColor="#111827"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btn_panel_repository_ignore_selected"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginTop="8dp"
+                    android:text="将勾选变化项加入屏蔽" />
+
+                <LinearLayout
+                    android:id="@+id/panel_repository_delta_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="屏蔽物品"
+                    android:textColor="#111827"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btn_panel_repository_remove_ignored"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginTop="8dp"
+                    android:text="移除勾选屏蔽物品" />
+
+                <LinearLayout
+                    android:id="@+id/panel_repository_ignored_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical" />
+            </LinearLayout>
+        </ScrollView>
+
+        <ScrollView
+            android:id="@+id/panel_page_log"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="队列状态"
+                    android:textColor="#111827"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/text_panel_queue_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="#ffffff"
+                    android:padding="12dp"
+                    android:text="队列空闲"
+                    android:textColor="#111827"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="请求日志"
+                    android:textColor="#111827"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/text_panel_queue_log"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="#ffffff"
+                    android:minHeight="220dp"
+                    android:padding="12dp"
+                    android:text="暂无日志"
+                    android:textColor="#1f2937"
+                    android:textIsSelectable="true"
+                    android:textSize="13sp" />
+            </LinearLayout>
+        </ScrollView>
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#e5e7eb"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <Button
+            android:id="@+id/btn_panel_start_selected"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:backgroundTint="#2563eb"
+            android:text="开始勾选项"
+            android:textColor="#ffffff" />
+    </LinearLayout>
+</LinearLayout>
