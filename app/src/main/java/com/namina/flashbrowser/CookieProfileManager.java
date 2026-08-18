@@ -39,7 +39,12 @@ final class CookieProfileManager {
     private static final String TARGET_PATH = "/pvz/index.php/default/main";
     private static final String COOKIE_KEY_PHPSESSID = "PHPSESSID";
     private static final String COOKIE_KEY_PVZOL = "pvzol";
-    private static final String COOKIE_KEY_PVZ_YOUKIA_NEW1 = "pvz_youkia_new1";
+    // Official seed-rule cookie name is a "pvz + youkia + new" combination whose
+    // version number changes over time (pvz_youkia_new1, pvz_youkia_new2, ...).
+    // Match any such key instead of hardcoding a single version.
+    private static final String PVZ_YOUKIA_NEW_KEY_FRAGMENT = "pvz[a-z0-9_.-]*youkia[a-z0-9_.-]*new[a-z0-9_.-]*";
+    private static final Pattern PVZ_YOUKIA_NEW_KEY_PATTERN =
+            Pattern.compile("(?i)^" + PVZ_YOUKIA_NEW_KEY_FRAGMENT + "$");
     private static final String[] SAVE_URL_KEYWORDS = new String[] {
             "pvzol",
             "youkia.pvz",
@@ -60,7 +65,7 @@ final class CookieProfileManager {
     private static final Pattern USER_SETTING_BLOCK_PATTERN =
             Pattern.compile("(?is)<UserSetting\\b[^>]*>.*?</UserSetting>");
     private static final Pattern CLIPBOARD_MINIMAL_COOKIE_PATTERN =
-            Pattern.compile("(?i)(PHPSESSID|pvz_youkia_new1)\\s*=\\s*([^;\\s<>\"]+)");
+            Pattern.compile("(?i)(PHPSESSID|" + PVZ_YOUKIA_NEW_KEY_FRAGMENT + ")\\s*=\\s*([^;\\s<>\"]+)");
     private static final int MAX_IMPORT_BYTES = 30 * 1024 * 1024;
 
     private final Context context;
@@ -845,7 +850,7 @@ final class CookieProfileManager {
                 addUniqueCookieEntry(phpSessions, entry);
                 continue;
             }
-            if (COOKIE_KEY_PVZ_YOUKIA_NEW1.equalsIgnoreCase(key)) {
+            if (isPvzYoukiaNewKey(key)) {
                 addUniqueCookieEntry(pvzYoukiaEntries, entry);
                 continue;
             }
@@ -963,6 +968,10 @@ final class CookieProfileManager {
         return cookieEntry.substring(index + 1).trim();
     }
 
+    private static boolean isPvzYoukiaNewKey(String key) {
+        return !TextUtils.isEmpty(key) && PVZ_YOUKIA_NEW_KEY_PATTERN.matcher(key.trim()).matches();
+    }
+
     private List<ImportedProfileParser> createImportedProfileParsers() {
         ArrayList<ImportedProfileParser> parsers = new ArrayList<>();
         parsers.add(this::parseImportedXmlText);
@@ -989,8 +998,8 @@ final class CookieProfileManager {
             if (COOKIE_KEY_PHPSESSID.equalsIgnoreCase(key)) {
                 normalizedEntry = COOKIE_KEY_PHPSESSID + "=" + value.trim();
                 addUniqueCookieEntry(phpSessions, normalizedEntry);
-            } else if (COOKIE_KEY_PVZ_YOUKIA_NEW1.equalsIgnoreCase(key)) {
-                normalizedEntry = COOKIE_KEY_PVZ_YOUKIA_NEW1 + "=" + value.trim();
+            } else if (isPvzYoukiaNewKey(key)) {
+                normalizedEntry = key + "=" + value.trim();
                 addUniqueCookieEntry(pvzYoukiaEntries, normalizedEntry);
             }
         }
@@ -1323,7 +1332,7 @@ final class CookieProfileManager {
                 }
                 if (COOKIE_KEY_PHPSESSID.equalsIgnoreCase(key)) {
                     addUniqueCookieEntry(phpSessions, entry);
-                } else if (COOKIE_KEY_PVZ_YOUKIA_NEW1.equalsIgnoreCase(key)) {
+                } else if (isPvzYoukiaNewKey(key)) {
                     addUniqueCookieEntry(pvzYoukiaEntries, entry);
                 } else if (COOKIE_KEY_PVZOL.equalsIgnoreCase(key) && TextUtils.isEmpty(pvzolEntry)) {
                     pvzolEntry = entry;
