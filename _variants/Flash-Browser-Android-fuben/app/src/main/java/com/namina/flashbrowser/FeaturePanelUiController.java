@@ -21,6 +21,7 @@ final class FeaturePanelUiController {
     private Button dailyDutyRunButton;
     private Button fullSweepRunButton;
     private Button fubenProgressRunButton;
+    private Button fubenResetRunButton;
     private Button medalRepeatRunButton;
     private Button startSelectedButton;
 
@@ -40,6 +41,7 @@ final class FeaturePanelUiController {
             Button dailyDutyRunButton,
             Button fullSweepRunButton,
             Button fubenProgressRunButton,
+            Button fubenResetRunButton,
             Button medalRepeatRunButton,
             Button startSelectedButton
     ) {
@@ -58,12 +60,13 @@ final class FeaturePanelUiController {
         this.dailyDutyRunButton = dailyDutyRunButton;
         this.fullSweepRunButton = fullSweepRunButton;
         this.fubenProgressRunButton = fubenProgressRunButton;
+        this.fubenResetRunButton = fubenResetRunButton;
         this.medalRepeatRunButton = medalRepeatRunButton;
         this.startSelectedButton = startSelectedButton;
     }
 
     void clear() {
-        bind(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        bind(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     void switchTab(int tab, int cookieTab, int basicTab, int repositoryTab, int logTab) {
@@ -145,6 +148,9 @@ final class FeaturePanelUiController {
         }
         if (fubenProgressRunButton != null) {
             fubenProgressRunButton.setEnabled(idle);
+        }
+        if (fubenResetRunButton != null) {
+            fubenResetRunButton.setEnabled(idle);
         }
         if (medalRepeatRunButton != null) {
             medalRepeatRunButton.setEnabled(idle);

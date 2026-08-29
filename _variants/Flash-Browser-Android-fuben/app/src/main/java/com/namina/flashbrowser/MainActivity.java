@@ -1343,6 +1343,7 @@ final class FeaturePanelDialogController {
     private Spinner medalBlock5RangeSpinner;
     private Button dailyDutyRunButton;
     private Button fullSweepRunButton;
+    private Button fubenResetRunButton;
     private Button startSelectedButton;
     private Button storageAccessButton;
     private TextView repositoryHintText;
@@ -1470,6 +1471,7 @@ final class FeaturePanelDialogController {
         medalRepeatSettingsLayout = dialogView.findViewById(R.id.layout_panel_medal_repeat_settings);
         medalRepeatSettingsButton = dialogView.findViewById(R.id.btn_panel_medal_repeat_settings);
         medalRepeatRunButton = dialogView.findViewById(R.id.btn_panel_medal_repeat_run);
+        fubenResetRunButton = dialogView.findViewById(R.id.btn_panel_fuben_reset);
         medalBlock1CheckBox = dialogView.findViewById(R.id.check_panel_medal_block_1);
         medalBlock2CheckBox = dialogView.findViewById(R.id.check_panel_medal_block_2);
         medalBlock3CheckBox = dialogView.findViewById(R.id.check_panel_medal_block_3);
@@ -1518,6 +1520,7 @@ final class FeaturePanelDialogController {
                 dailyDutyRunButton,
                 fullSweepRunButton,
                 fubenProgressRunButton,
+                fubenResetRunButton,
                 medalRepeatRunButton,
                 startSelectedButton
         );
@@ -1650,6 +1653,7 @@ final class FeaturePanelDialogController {
                 startTaskRequests(false, FeaturePanelTaskController.TaskMode.FUBEN_PROGRESS));
         medalRepeatRunButton.setOnClickListener(v ->
                 startTaskRequests(false, FeaturePanelTaskController.TaskMode.MEDAL_REPEAT));
+        fubenResetRunButton.setOnClickListener(v -> startFubenResetRequests());
         startSelectedButton.setOnClickListener(v -> startTaskRequests(true, null));
         storageAccessButton.setOnClickListener(v -> requestAllFilesAccessAction.run());
     }
@@ -1783,6 +1787,74 @@ final class FeaturePanelDialogController {
         dutyRequestQueue.startRequests(request);
     }
 
+    private void startFubenResetRequests() {
+        if (concurrencyInput == null
+                || requestIntervalInput == null
+                || frequentRetryIntervalInput == null) {
+            return;
+        }
+        if (dutyRequestQueue.isBusy()) {
+            Toast.makeText(activity, "Request queue is already running", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int concurrency = parsePositiveInt(concurrencyInput.getText().toString(), 1);
+        int requestIntervalMs = parseNonNegativeInt(requestIntervalInput.getText().toString(), 700);
+        int frequentRetryIntervalMs = parseNonNegativeInt(
+                frequentRetryIntervalInput.getText().toString(),
+                14000
+        );
+
+        LinkedHashMap<String, DutyRequestQueue.CookieTarget> deduplicatedTargets = new LinkedHashMap<>();
+        for (FeatureCookieChoice choice : featureCookieChoices) {
+            if (!choice.selected || TextUtils.isEmpty(choice.baseUrl) || TextUtils.isEmpty(choice.cookies)) {
+                continue;
+            }
+            String key = choice.baseUrl + "\n" + choice.cookies;
+            if (!deduplicatedTargets.containsKey(key)) {
+                deduplicatedTargets.put(key, new DutyRequestQueue.CookieTarget(
+                        choice.currentPage ? "当前页面 Cookie" : choice.label,
+                        choice.baseUrl,
+                        choice.cookies
+                ));
+            }
+        }
+
+        if (deduplicatedTargets.isEmpty()) {
+            Toast.makeText(activity, "请先勾选至少一个可用 Cookie。", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        dutyRequestQueue.startFubenResetRequests(
+                new ArrayList<>(deduplicatedTargets.values()),
+                concurrency,
+                requestIntervalMs,
+                frequentRetryIntervalMs
+        );
+    }
+
+    private int parsePositiveInt(String value, int fallback) {
+        if (TextUtils.isEmpty(value)) {
+            return Math.max(1, fallback);
+        }
+        try {
+            return Math.max(1, Integer.parseInt(value.trim()));
+        } catch (Exception e) {
+            return Math.max(1, fallback);
+        }
+    }
+
+    private int parseNonNegativeInt(String value, int fallback) {
+        if (TextUtils.isEmpty(value)) {
+            return Math.max(0, fallback);
+        }
+        try {
+            return Math.max(0, Integer.parseInt(value.trim()));
+        } catch (Exception e) {
+            return Math.max(0, fallback);
+        }
+    }
+
     private void clearReferences() {
         dialog = null;
         tabCookieButton = null;
@@ -1829,6 +1901,7 @@ final class FeaturePanelDialogController {
         medalBlock5RangeSpinner = null;
         dailyDutyRunButton = null;
         fullSweepRunButton = null;
+        fubenResetRunButton = null;
         startSelectedButton = null;
         storageAccessButton = null;
         repositoryHintText = null;
