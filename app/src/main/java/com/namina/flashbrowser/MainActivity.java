@@ -395,6 +395,15 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onLoadResource(WebView view, String url) {
+                super.onLoadResource(view, url);
+                if (url != null && (url.startsWith("tencent://") || url.startsWith("mqqapi://")
+                        || url.startsWith("mqqopensdkapi://") || url.startsWith("intent://"))) {
+                    handleTencentDeepLink(url);
+                }
+            }
+
+            @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 browserFullscreenController.resetForNavigation();
@@ -865,12 +874,13 @@ public class MainActivity extends AppCompatActivity {
 
     private void openQqGroupJoinPage() {
         try {
-            Uri pageUri = Uri.parse(GROUP_JOIN_URL);
-            Intent openPage = new Intent(Intent.ACTION_VIEW, pageUri);
-            openPage.setPackage(getPackageName());
-            startActivity(openPage);
+            if (browserNavigationController != null) {
+                browserNavigationController.loadUrl(GROUP_JOIN_URL);
+            } else {
+                openQqGroupJoinUrlInSystemBrowser();
+            }
         } catch (Exception e) {
-            Log.e(TAG, "Unable to open QQ group page", e);
+            Log.e(TAG, "Unable to open QQ group page in WebView", e);
             openQqGroupJoinUrlInSystemBrowser();
         }
     }
