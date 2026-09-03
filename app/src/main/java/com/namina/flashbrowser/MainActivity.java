@@ -109,6 +109,9 @@ public class MainActivity extends AppCompatActivity {
     private static final float TOUCH_HOLD_MOVE_TOLERANCE_DP = 18f;
     private static final String DEFAULT_MANUAL_TEST_SWF = "http://pvzol.org/youkia/main.swf";
     private static final String MANUAL_TEST_PROXY_BASE_URL = "https://webbrowsertools.com/__manual_test__/index.html";
+    private static final String GROUP_JOIN_URL =
+            "https://jq.qq.com/?_wv=1027&k=3gAXiCUm";
+    private static final String TEN_CENT_GROUP_SCHEME = "tencent://groupwpa/";
     private WebView wrapper;
     private EditText urlInput;
     private ProgressBar progressBar;
@@ -212,6 +215,11 @@ public class MainActivity extends AppCompatActivity {
                     public String getCurrentPageTitle() {
                         return wrapper == null ? null : wrapper.getTitle();
                     }
+
+                    @Override
+                    public void showWelcomeDialog() {
+                        maybeShowWelcomeDialog();
+                    }
                 }
         );
         cookieProfileManager.ensureInitialized();
@@ -293,6 +301,7 @@ public class MainActivity extends AppCompatActivity {
         }
         wrapper.setOnTouchListener((v, event) -> browserTouchController.handleTouch(event));
         handleIncomingIntent(getIntent());
+        wrapper.postDelayed(this::showWelcomeIfFirstLaunch, 400L);
     }
 
     @Override
@@ -379,6 +388,9 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (request != null && handleTencentDeepLink(request.getUrl() == null ? null : request.getUrl().toString())) {
+                    return true;
+                }
                 return false;
             }
 
@@ -815,6 +827,121 @@ public class MainActivity extends AppCompatActivity {
         }
         Toast.makeText(this, R.string.cookie_storage_permission_granted_tip, Toast.LENGTH_LONG).show();
     }
+
+    private void maybeShowWelcomeDialog() {
+        showWelcomeIfFirstLaunch();
+    }
+
+    private void showWelcomeIfFirstLaunch() {
+        if (!preferenceStore.shouldShowWelcomeDialog()) {
+            return;
+        }
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_welcome_group, null);
+        CheckBox dontShowAgainCheckBox = dialogView.findViewById(R.id.welcome_dialog_dont_show_again);
+        Button joinButton = dialogView.findViewById(R.id.btn_welcome_join_group);
+        Button cancelButton = dialogView.findViewById(R.id.btn_welcome_cancel);
+
+        AlertDialog welcomeDialog = new AlertDialog.Builder(this)
+                .setView(dialogView)
+                .setCancelable(true)
+                .create();
+
+        cancelButton.setOnClickListener(v -> {
+            if (dontShowAgainCheckBox.isChecked()) {
+                preferenceStore.setWelcomeDialogDismissed(true);
+            }
+            welcomeDialog.dismiss();
+        });
+        joinButton.setOnClickListener(v -> {
+            if (dontShowAgainCheckBox.isChecked()) {
+                preferenceStore.setWelcomeDialogDismissed(true);
+            }
+            welcomeDialog.dismiss();
+            openQqGroupJoinPage();
+        });
+
+        welcomeDialog.show();
+    }
+
+    private void openQqGroupJoinPage() {
+        try {
+            Uri pageUri = Uri.parse(GROUP_JOIN_URL);
+            Intent openPage = new Intent(Intent.ACTION_VIEW, pageUri);
+            openPage.setPackage(getPackageName());
+            startActivity(openPage);
+        } catch (Exception e) {
+            Log.e(TAG, "Unable to open QQ group page", e);
+            openQqGroupJoinUrlInSystemBrowser();
+        }
+    }
+
+    private void openQqGroupJoinUrlInSystemBrowser() {
+        try {
+            Intent systemBrowser = new Intent(Intent.ACTION_VIEW, Uri.parse(GROUP_JOIN_URL));
+            startActivity(Intent.createChooser(systemBrowser, null));
+        } catch (Exception e) {
+            Log.e(TAG, "Unable to open QQ group join URL in system browser", e);
+        }
+    }
+
+    private boolean handleTencentDeepLink(String targetUrl) {
+        if (targetUrl == null) {
+            return false;
+        }
+        String url = targetUrl.trim();
+        if (url.startsWith("tencent://")) {
+            if (url.startsWith(TEN_CENT_GROUP_SCHEME)) {
+                openQqGroupTencentIntent(url);
+                return true;
+            }
+            return false;
+        }
+        if (url.startsWith("mqqapi://") || url.startsWith("mqqopensdkapi://")) {
+            openQqGroupTencentIntent(url);
+            return true;
+        }
+        if (url.startsWith("intent://")) {
+            if (url.contains("groupuin")) {
+                openQqGroupTencentIntent(url);
+                return true;
+            }
+            return false;
+        }
+        if (url.startsWith("https://qm.qq.com/")
+                || url.startsWith("http://qm.qq.com/")
+                || url.startsWith("https://jq.qq.com/")
+                || url.startsWith("http://jq.qq.com/")
+                || url.contains("jq.qq.com")
+                || url.contains("qm.qq.com")) {
+            handleQqGroupWebPage(url);
+            return true;
+        }
+        return false;
+    }
+
+    private void openQqGroupTencentIntent(String deepLink) {
+        try {
+            Intent tencentIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(deepLink));
+            tencentIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_HISTORY);
+            startActivity(tencentIntent);
+        } catch (Exception e) {
+            Log.e(TAG, "QQ group scheme launch failed, fallback to system browser", e);
+            openQqGroupJoinUrlInSystemBrowser();
+        }
+    }
+
+    private void handleQqGroupWebPage(String url) {
+        try {
+            Uri pageUri = Uri.parse(url);
+            Intent pageIntent = new Intent(Intent.ACTION_VIEW, pageUri);
+            pageIntent.setPackage(getPackageName());
+            startActivity(pageIntent);
+        } catch (Exception e) {
+            Log.e(TAG, "Unable to open QQ group web page", e);
+            openQqGroupJoinUrlInSystemBrowser();
+        }
+    }
+
 
     private void handleIncomingIntent(Intent intent) {
         if (intent == null) {
@@ -4361,6 +4488,8 @@ final class BrowserSettingsController {
         String getCurrentPageUrl();
 
         String getCurrentPageTitle();
+
+        void showWelcomeDialog();
     }
 
     private static final int MENU_COOKIE_PROFILES = 100;
@@ -4369,6 +4498,7 @@ final class BrowserSettingsController {
     private static final int MENU_FONT_MODE_SERIF = 103;
     private static final int MENU_FONT_MODE_EMBEDDED = 104;
     private static final int MENU_NAV_PVZ_YOUKIA = 108;
+    private static final int MENU_WELCOME_GROUP = 109;
 
     private static final int ORIENTATION_LANDSCAPE = 0;
     private static final int ORIENTATION_PORTRAIT = 1;
@@ -4459,6 +4589,7 @@ final class BrowserSettingsController {
         menu.getMenu().add(0, ORIENTATION_SYSTEM, 6, activity.getString(R.string.orientation_system));
         menu.getMenu().add(0, MENU_MAPPING_CONFIG, 7, activity.getString(R.string.mapping_config_path));
         menu.getMenu().add(0, MENU_NAV_PVZ_YOUKIA, 8, "导航到 pvz.youkia.com");
+        menu.getMenu().add(0, MENU_WELCOME_GROUP, 9, activity.getString(R.string.welcome_show_group_dialog));
         menu.setOnMenuItemClickListener(item -> handleSettingsMenuItem(item.getItemId()));
         menu.show();
     }
@@ -4486,6 +4617,10 @@ final class BrowserSettingsController {
         }
         if (itemId == MENU_NAV_PVZ_YOUKIA) {
             host.loadUrl(PVZ_YOUKIA_ENTRY_URL);
+            return true;
+        }
+        if (itemId == MENU_WELCOME_GROUP) {
+            host.showWelcomeDialog();
             return true;
         }
         host.onOrientationSelected(itemId);

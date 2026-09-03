@@ -29,6 +29,7 @@ public final class BrowserPreferenceStore {
     private static final String PREF_PANEL_MEDAL_REPEAT_INFINITE = "panel_medal_repeat_infinite";
     private static final String PREF_PANEL_MEDAL_DAILY_INTEGRAL_PREFIX = "panel_medal_daily_integral_";
     private static final String PREF_PANEL_REPOSITORY_RECORDS = "panel_repository_records";
+    private static final String PREF_WELCOME_DIALOG_DISMISSED = "welcome_dialog_dismissed";
     private static final SimpleDateFormat DAY_FORMAT =
             new SimpleDateFormat("yyyyMMdd", Locale.US);
 
@@ -211,5 +212,13 @@ public final class BrowserPreferenceStore {
 
     void setRepositoryRecordsJson(String value) {
         preferences.edit().putString(PREF_PANEL_REPOSITORY_RECORDS, value == null ? "{}" : value).apply();
+    }
+
+    boolean shouldShowWelcomeDialog() {
+        return !preferences.getBoolean(PREF_WELCOME_DIALOG_DISMISSED, false);
+    }
+
+    void setWelcomeDialogDismissed(boolean dismissed) {
+        preferences.edit().putBoolean(PREF_WELCOME_DIALOG_DISMISSED, dismissed).apply();
     }
 }

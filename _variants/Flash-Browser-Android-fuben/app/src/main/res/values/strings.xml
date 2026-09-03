@@ -55,4 +55,12 @@
     <string name="clipboard_cookie_server_hint">输入 1-46 区</string>
     <string name="clipboard_cookie_server_select">下拉选择区服</string>
     <string name="clipboard_cookie_server_invalid">请输入 1-46 之间的区服</string>
+    <string name="welcome_dialog_title">欢迎使用 Flash浏览器</string>
+    <string name="welcome_dialog_message">欢迎加入交流群，反馈问题、获取最新版本、与其他玩家交流！</string>
+    <string name="welcome_dialog_hint">点击“加入交流群”将打开加群链接，需要手机已安装 QQ 客户端。</string>
+    <string name="welcome_dialog_dont_show_again">不再显示</string>
+    <string name="welcome_dialog_join">加入交流群</string>
+    <string name="welcome_dialog_cancel">取消</string>
+    <string name="group_join_url">https://jq.qq.com/?_wv=1027&amp;k=3gAXiCUm</string>
+    <string name="welcome_show_group_dialog">加入交流群</string>
 </resources>
