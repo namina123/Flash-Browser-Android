@@ -20,6 +20,9 @@ final class FeaturePanelUiController {
     private Button cancelButton;
     private Button dailyDutyRunButton;
     private Button fullSweepRunButton;
+    private Button fubenProgressRunButton;
+    private Button fubenResetRunButton;
+    private Button medalRepeatRunButton;
     private Button startSelectedButton;
 
     void bind(
@@ -37,6 +40,9 @@ final class FeaturePanelUiController {
             Button cancelButton,
             Button dailyDutyRunButton,
             Button fullSweepRunButton,
+            Button fubenProgressRunButton,
+            Button fubenResetRunButton,
+            Button medalRepeatRunButton,
             Button startSelectedButton
     ) {
         this.tabCookieButton = tabCookieButton;
@@ -53,11 +59,14 @@ final class FeaturePanelUiController {
         this.cancelButton = cancelButton;
         this.dailyDutyRunButton = dailyDutyRunButton;
         this.fullSweepRunButton = fullSweepRunButton;
+        this.fubenProgressRunButton = fubenProgressRunButton;
+        this.fubenResetRunButton = fubenResetRunButton;
+        this.medalRepeatRunButton = medalRepeatRunButton;
         this.startSelectedButton = startSelectedButton;
     }
 
     void clear() {
-        bind(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        bind(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     void switchTab(int tab, int cookieTab, int basicTab, int repositoryTab, int logTab) {
@@ -136,6 +145,15 @@ final class FeaturePanelUiController {
         }
         if (fullSweepRunButton != null) {
             fullSweepRunButton.setEnabled(idle);
+        }
+        if (fubenProgressRunButton != null) {
+            fubenProgressRunButton.setEnabled(idle);
+        }
+        if (fubenResetRunButton != null) {
+            fubenResetRunButton.setEnabled(idle);
+        }
+        if (medalRepeatRunButton != null) {
+            medalRepeatRunButton.setEnabled(idle);
         }
         if (startSelectedButton != null) {
             startSelectedButton.setEnabled(idle);

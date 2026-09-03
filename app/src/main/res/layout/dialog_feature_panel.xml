@@ -292,6 +292,286 @@
                         android:layout_height="38dp"
                         android:text="立即运行" />
                 </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#ffffff"
+                    android:elevation="1dp"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="领取副本进度奖励"
+                            android:textColor="#111827"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/btn_panel_fuben_progress_settings"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:text="设置" />
+
+                        <Button
+                            android:id="@+id/btn_panel_fuben_progress_run"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:layout_marginStart="8dp"
+                            android:text="立即运行" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/layout_panel_fuben_progress_settings"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="每个选中的数字都会发送 4 次 integral 奖励请求。"
+                            android:textColor="#4b5563"
+                            android:textSize="13sp" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress_stage_1"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="1" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress_stage_2"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="2" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress_stage_3"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="3" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress_stage_4"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="4" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_fuben_progress_stage_5"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="5" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#ffffff"
+                    android:elevation="1dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="重置副本"
+                        android:textColor="#111827"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btn_panel_fuben_reset"
+                        android:layout_width="wrap_content"
+                        android:layout_height="38dp"
+                        android:text="立即重置" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#ffffff"
+                    android:elevation="1dp"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <CheckBox
+                            android:id="@+id/check_panel_medal_repeat"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="重复领取勋章奖励"
+                            android:textColor="#111827"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/btn_panel_medal_repeat_settings"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:text="设置" />
+
+                        <Button
+                            android:id="@+id/btn_panel_medal_repeat_run"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:layout_marginStart="8dp"
+                            android:text="立即运行" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/layout_panel_medal_repeat_settings"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="每天第一次会先发 4 次 integral，请按副本单独设置最大领取范围。"
+                            android:textColor="#4b5563"
+                            android:textSize="13sp" />
+
+                        <CheckBox
+                            android:id="@+id/check_panel_medal_repeat_infinite"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="无限重复"
+                            android:textColor="#111827" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <CheckBox
+                                android:id="@+id/check_panel_medal_block_1"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:checked="false"
+                                android:text="副本 1" />
+
+                            <Spinner
+                                android:id="@+id/spinner_panel_medal_block_1_range"
+                                android:layout_width="120dp"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <CheckBox
+                                android:id="@+id/check_panel_medal_block_2"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:checked="false"
+                                android:text="副本 2" />
+
+                            <Spinner
+                                android:id="@+id/spinner_panel_medal_block_2_range"
+                                android:layout_width="120dp"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <CheckBox
+                                android:id="@+id/check_panel_medal_block_3"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:checked="false"
+                                android:text="副本 3" />
+
+                            <Spinner
+                                android:id="@+id/spinner_panel_medal_block_3_range"
+                                android:layout_width="120dp"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <CheckBox
+                                android:id="@+id/check_panel_medal_block_4"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:checked="false"
+                                android:text="副本 4" />
+
+                            <Spinner
+                                android:id="@+id/spinner_panel_medal_block_4_range"
+                                android:layout_width="120dp"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <CheckBox
+                                android:id="@+id/check_panel_medal_block_5"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:checked="false"
+                                android:text="副本 5" />
+
+                            <Spinner
+                                android:id="@+id/spinner_panel_medal_block_5_range"
+                                android:layout_width="120dp"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
             </LinearLayout>
         </ScrollView>
 

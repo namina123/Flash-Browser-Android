@@ -120,6 +120,16 @@ final class PvzolAmfClient {
         }
     }
 
+    private static final class RpcRequest {
+        final String target;
+        final Object[] arguments;
+
+        RpcRequest(String target, Object[] arguments) {
+            this.target = target;
+            this.arguments = arguments;
+        }
+    }
+
     private PvzolAmfClient() {
     }
 
@@ -136,6 +146,73 @@ final class PvzolAmfClient {
         Amf0Message message = new Amf0Message();
         message.addBody(new Amf0Body(target, "/1", wrappedArguments, Amf0Body.DATA_TYPE_ARRAY));
         return AmfCodec.encodeAmf0Message(message);
+    }
+
+    static byte[] buildRpcRequestPayload(String target, Object[] arguments) throws IOException {
+        return buildRpcBatchRequestPayload(Collections.singletonList(new RpcRequest(target, arguments)));
+    }
+
+    static byte[] buildRpcBatchRequestPayload(List<RpcRequest> requests) throws IOException {
+        if (requests == null || requests.isEmpty()) {
+            throw new IOException("No RPC requests to encode");
+        }
+        Amf0Message message = new Amf0Message();
+        for (int i = 0; i < requests.size(); i += 1) {
+            RpcRequest request = requests.get(i);
+            if (request == null || TextUtils.isEmpty(request.target)) {
+                continue;
+            }
+            message.addBody(new Amf0Body(
+                    request.target,
+                    "/" + (i + 1),
+                    request.arguments == null ? new Object[0] : request.arguments,
+                    Amf0Body.DATA_TYPE_ARRAY
+            ));
+        }
+        if (message.getBodies().isEmpty()) {
+            throw new IOException("No valid RPC bodies to encode");
+        }
+        return AmfCodec.encodeAmf0Message(message);
+    }
+
+    static byte[] buildFubenAwardPayload(String awardType, int value) throws IOException {
+        return buildRpcRequestPayload("api.fuben.award", new Object[] {
+                awardType,
+                Double.valueOf((double) value)
+        });
+    }
+
+    static byte[] buildBundledFubenAwardPayload(String awardType, List<Integer> values) throws IOException {
+        ArrayList<RpcRequest> requests = new ArrayList<>();
+        if (values != null) {
+            for (Integer value : values) {
+                if (value == null) {
+                    continue;
+                }
+                requests.add(new RpcRequest("api.fuben.award", new Object[] {
+                        awardType,
+                        Double.valueOf((double) value.intValue())
+                }));
+            }
+        }
+        return buildRpcBatchRequestPayload(requests);
+    }
+
+    static byte[] buildFubenRewardPayload(String rewardKey) throws IOException {
+        return buildRpcRequestPayload("api.fuben.reward", new Object[] {rewardKey});
+    }
+
+    static byte[] buildBundledFubenRewardPayload(List<String> rewardKeys) throws IOException {
+        ArrayList<RpcRequest> requests = new ArrayList<>();
+        if (rewardKeys != null) {
+            for (String rewardKey : rewardKeys) {
+                if (TextUtils.isEmpty(rewardKey)) {
+                    continue;
+                }
+                requests.add(new RpcRequest("api.fuben.reward", new Object[] {rewardKey}));
+            }
+        }
+        return buildRpcBatchRequestPayload(requests);
     }
 
     static Response postDutyReward(String baseUrl, String cookies, int rewardId, int category, ActiveCall call)
@@ -194,10 +271,15 @@ final class PvzolAmfClient {
 
     static Response postRpc(String baseUrl, String target, int[] arguments, String cookies, ActiveCall call)
             throws IOException {
+        byte[] payload = buildRpcRequestPayload(target, arguments);
+        return postRawRequest(baseUrl, cookies, payload, call);
+    }
+
+    static Response postRawRequest(String baseUrl, String cookies, byte[] payload, ActiveCall call)
+            throws IOException {
         String normalizedBaseUrl = normalizeBaseUrl(baseUrl);
         Uri baseUri = Uri.parse(normalizedBaseUrl);
         String endpoint = normalizedBaseUrl + "/pvz/amf/";
-        byte[] payload = buildRpcRequestPayload(target, arguments);
 
         HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
         if (call != null) {
@@ -242,10 +324,46 @@ final class PvzolAmfClient {
         if (responseBytes.length > 0) {
             Amf0Message responseMessage = AmfCodec.decodeAmf0Message(responseBytes);
             if (!responseMessage.getBodies().isEmpty()) {
-                decodedValue = unwrapResponseValue(responseMessage.getBodies().get(0).getValue());
-                applicationStatus = extractApplicationStatus(decodedValue);
-                description = extractDescription(decodedValue);
-                responseText = stringifyDecodedValue(decodedValue);
+                ArrayList<Object> decodedValues = new ArrayList<>(responseMessage.getBodies().size());
+                StringBuilder descriptionBuilder = new StringBuilder();
+                StringBuilder textBuilder = new StringBuilder();
+                Integer firstNonSuccessStatus = null;
+                for (int i = 0; i < responseMessage.getBodies().size(); i += 1) {
+                    Object bodyValue = unwrapResponseValue(responseMessage.getBodies().get(i).getValue());
+                    decodedValues.add(bodyValue);
+
+                    Integer bodyStatus = extractApplicationStatus(bodyValue);
+                    if (bodyStatus != null) {
+                        if (applicationStatus == null) {
+                            applicationStatus = bodyStatus;
+                        }
+                        if (bodyStatus.intValue() != 0 && firstNonSuccessStatus == null) {
+                            firstNonSuccessStatus = bodyStatus;
+                        }
+                    }
+
+                    String bodyDescription = extractDescription(bodyValue);
+                    if (!TextUtils.isEmpty(bodyDescription)) {
+                        if (descriptionBuilder.length() > 0) {
+                            descriptionBuilder.append(" | ");
+                        }
+                        descriptionBuilder.append(bodyDescription);
+                    }
+
+                    String bodyText = stringifyDecodedValue(bodyValue);
+                    if (!TextUtils.isEmpty(bodyText)) {
+                        if (textBuilder.length() > 0) {
+                            textBuilder.append('\n');
+                        }
+                        textBuilder.append(bodyText);
+                    }
+                }
+                if (firstNonSuccessStatus != null) {
+                    applicationStatus = firstNonSuccessStatus;
+                }
+                decodedValue = decodedValues.size() == 1 ? decodedValues.get(0) : decodedValues;
+                description = descriptionBuilder.length() == 0 ? null : descriptionBuilder.toString();
+                responseText = textBuilder.length() == 0 ? null : textBuilder.toString();
             }
         }
 

@@ -5,6 +5,7 @@ import android.text.TextUtils;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -18,6 +19,8 @@ final class DutyRequestQueue {
     private static final int CLAIM_BLOCK_INTERVAL_MS = 14000;
     private static final List<PvzolAmfClient.RewardRequest> FULL_SWEEP_REWARD_REQUESTS =
             PvzolAmfClient.buildFullSweepRewardRequests();
+    private static final SimpleDateFormat DAY_FORMAT =
+            new SimpleDateFormat("yyyyMMdd", Locale.US);
 
     interface Listener {
         void onQueueUpdated(StateSnapshot snapshot);
@@ -78,6 +81,7 @@ final class DutyRequestQueue {
 
     private static final int REQUEST_TYPE_DISCOVER = 0;
     private static final int REQUEST_TYPE_REWARD = 1;
+    private static final int REQUEST_TYPE_CUSTOM = 2;
 
     private final Object lock = new Object();
     private final ArrayList<String> logs = new ArrayList<>();
@@ -85,6 +89,8 @@ final class DutyRequestQueue {
     private final CopyOnWriteArrayList<ActiveConnection> activeConnections = new CopyOnWriteArrayList<>();
     private final HashMap<String, Long> cookieCooldownUntilMs = new HashMap<>();
     private final HashSet<String> inFlightCookieKeys = new HashSet<>();
+    private final HashMap<String, String> medalIntegralDayByKey = new HashMap<>();
+    private final HashMap<String, String> medalRewardResetDayByKey = new HashMap<>();
 
     private Listener listener;
     private ExecutorService executor;
@@ -99,6 +105,10 @@ final class DutyRequestQueue {
     private int requestIntervalMs;
     private int frequentRetryIntervalMs;
     private long nextDispatchUptimeMs;
+    private boolean medalRepeatInfinite;
+    private boolean medalRepeatStopRequested;
+    private List<CookieTarget> medalRepeatTargets = Collections.emptyList();
+    private List<FeaturePanelTaskController.MedalBlockRequest> medalRepeatBlocks = Collections.emptyList();
 
     void setListener(Listener listener) {
         synchronized (lock) {
@@ -113,12 +123,115 @@ final class DutyRequestQueue {
         }
     }
 
-    void startDailyDutyRewards(
+    void startRequests(FeaturePanelTaskController.StartRequest request) {
+        synchronized (lock) {
+            if (running || paused || cancelling) {
+                appendLogLocked("Queue is already running.");
+                notifyListenerLocked();
+                return;
+            }
+
+            pendingTasks.clear();
+            logs.clear();
+            cookieCooldownUntilMs.clear();
+            inFlightCookieKeys.clear();
+            medalIntegralDayByKey.clear();
+            medalRewardResetDayByKey.clear();
+            completed = 0;
+            failed = 0;
+            skipped = 0;
+            active = 0;
+            total = 0;
+            this.requestIntervalMs = Math.max(0, request == null ? 0 : request.requestIntervalMs);
+            this.frequentRetryIntervalMs = Math.max(0, request == null ? 0 : request.frequentRetryIntervalMs);
+            nextDispatchUptimeMs = 0L;
+            cancelling = false;
+            paused = false;
+            medalRepeatInfinite = request != null && request.medalRepeatInfinite;
+            medalRepeatStopRequested = false;
+            medalRepeatTargets = new ArrayList<>();
+            medalRepeatBlocks = request == null || request.medalBlockRequests == null
+                    ? Collections.emptyList()
+                    : new ArrayList<>(request.medalBlockRequests);
+
+            int eligibleTargetCount = 0;
+            ArrayList<String> modeLabels = new ArrayList<>();
+            if (request != null) {
+                if (request.runFullSweep) {
+                    modeLabels.add("全任务直领");
+                } else if (request.runDailyDuty) {
+                    modeLabels.add("领取每日任务");
+                }
+                if (request.fubenProgressStages != null && !request.fubenProgressStages.isEmpty()) {
+                    modeLabels.add("领取副本进度奖励");
+                }
+                if (request.medalBlockRequests != null && !request.medalBlockRequests.isEmpty()) {
+                    modeLabels.add("重复领取勋章奖励");
+                }
+            }
+
+            List<CookieTarget> targets = request == null ? Collections.emptyList() : request.targets;
+            for (CookieTarget target : targets) {
+                if (target == null || TextUtils.isEmpty(target.baseUrl) || TextUtils.isEmpty(target.cookies)) {
+                    skipped += 1;
+                    continue;
+                }
+                if (target.baseUrl.toLowerCase(Locale.US).contains("pvzol.org")) {
+                    skipped += 1;
+                    appendLogLocked("Skip " + target.label + ": base URL contains pvzol.org");
+                    continue;
+                }
+                eligibleTargetCount += 1;
+                if (request != null && request.medalBlockRequests != null && !request.medalBlockRequests.isEmpty()) {
+                    medalRepeatTargets.add(target);
+                    initializeMedalIntegralDayState(target, request.medalBlockRequests, request.medalDailyIntegralKeys);
+                    initializeMedalRewardResetDayState(target, request.medalBlockRequests);
+                }
+                if (request != null && request.runFullSweep) {
+                    for (PvzolAmfClient.RewardRequest rewardRequest : FULL_SWEEP_REWARD_REQUESTS) {
+                        pendingTasks.add(RequestTask.reward(target, rewardRequest.rewardId, rewardRequest.category));
+                        total += 1;
+                    }
+                } else if (request != null && request.runDailyDuty) {
+                    pendingTasks.add(RequestTask.discovery(target));
+                    total += 1;
+                }
+                enqueueFubenProgressTasks(target, request == null ? null : request.fubenProgressStages);
+                enqueueMedalRepeatTasks(
+                        target,
+                        request == null ? null : request.medalBlockRequests,
+                        request != null ? request.medalDailyIntegralKeys : null,
+                        true
+                );
+            }
+
+            if (total <= 0) {
+                appendLogLocked("No eligible cookie targets.");
+                notifyListenerLocked();
+                return;
+            }
+
+            running = true;
+            appendLogLocked("Queue started. mode=" + TextUtils.join(" + ", modeLabels)
+                    + ", targets=" + eligibleTargetCount
+                    + ", requests=" + total
+                    + ", concurrency=" + Math.max(1, request == null ? 1 : request.concurrency)
+                    + ", interval=" + this.requestIntervalMs + "ms"
+                    + ", frequentInterval=" + this.frequentRetryIntervalMs + "ms");
+            int concurrency = Math.max(1, request == null ? 1 : request.concurrency);
+            executor = java.util.concurrent.Executors.newFixedThreadPool(concurrency);
+            for (int i = 0; i < concurrency; i += 1) {
+                executor.execute(this::workerLoop);
+            }
+            notifyListenerLocked();
+        }
+    }
+
+    void startFubenResetRequests(
             List<CookieTarget> targets,
             int concurrency,
             int requestIntervalMs,
-            int frequentRetryIntervalMs,
-            boolean fullSweepMode
+            int frequentRetryIntervalMs
     ) {
         synchronized (lock) {
             if (running || paused || cancelling) {
@@ -131,6 +244,8 @@ final class DutyRequestQueue {
             logs.clear();
             cookieCooldownUntilMs.clear();
             inFlightCookieKeys.clear();
+            medalIntegralDayByKey.clear();
+            medalRewardResetDayByKey.clear();
             completed = 0;
             failed = 0;
             skipped = 0;
@@ -141,6 +256,10 @@ final class DutyRequestQueue {
             nextDispatchUptimeMs = 0L;
             cancelling = false;
             paused = false;
+            medalRepeatInfinite = false;
+            medalRepeatStopRequested = false;
+            medalRepeatTargets = Collections.emptyList();
+            medalRepeatBlocks = Collections.emptyList();
 
             int eligibleTargetCount = 0;
             for (CookieTarget target : targets) {
@@ -154,15 +273,11 @@ final class DutyRequestQueue {
                     continue;
                 }
                 eligibleTargetCount += 1;
-                if (fullSweepMode) {
-                    for (PvzolAmfClient.RewardRequest rewardRequest : FULL_SWEEP_REWARD_REQUESTS) {
-                        pendingTasks.add(RequestTask.reward(target, rewardRequest.rewardId, rewardRequest.category));
-                        total += 1;
-                    }
-                } else {
-                    pendingTasks.add(RequestTask.discovery(target));
-                    total += 1;
+                ArrayList<String> rewardKeys = new ArrayList<>(5);
+                for (int blockNumber = 1; blockNumber <= 5; blockNumber += 1) {
+                    rewardKeys.add(blockNumber + ".1");
                 }
+                enqueueBundledRewardPacket(target, rewardKeys, "重置副本 reward 合包");
             }
 
             if (total <= 0) {
@@ -172,14 +287,15 @@ final class DutyRequestQueue {
             }
 
             running = true;
-            appendLogLocked("Queue started. mode=" + (fullSweepMode ? "full-sweep" : "daily-duty")
+            int resolvedConcurrency = Math.max(1, concurrency);
+            appendLogLocked("Queue started. mode=重置副本"
                     + ", targets=" + eligibleTargetCount
                     + ", requests=" + total
-                    + ", concurrency=" + Math.max(1, concurrency)
+                    + ", concurrency=" + resolvedConcurrency
                     + ", interval=" + this.requestIntervalMs + "ms"
                     + ", frequentInterval=" + this.frequentRetryIntervalMs + "ms");
-            executor = java.util.concurrent.Executors.newFixedThreadPool(Math.max(1, concurrency));
-            for (int i = 0; i < Math.max(1, concurrency); i += 1) {
+            executor = java.util.concurrent.Executors.newFixedThreadPool(resolvedConcurrency);
+            for (int i = 0; i < resolvedConcurrency; i += 1) {
                 executor.execute(this::workerLoop);
             }
             notifyListenerLocked();
@@ -212,6 +328,16 @@ final class DutyRequestQueue {
     void cancel() {
         synchronized (lock) {
             if (!running && !paused && !cancelling) {
+                return;
+            }
+            if (!cancelling && !medalRepeatStopRequested
+                    && !medalRepeatBlocks.isEmpty() && !medalRepeatTargets.isEmpty()) {
+                enqueueStopMedalRewardReset(medalRepeatTargets, medalRepeatBlocks);
+                medalRepeatStopRequested = true;
+                paused = false;
+                lock.notifyAll();
+                appendLogLocked("停止前已补发勾选副本的 reward 重置请求，等待排空后停止。");
+                notifyListenerLocked();
                 return;
             }
             cancelling = true;
@@ -250,8 +376,10 @@ final class DutyRequestQueue {
             try {
                 if (task.type == REQUEST_TYPE_DISCOVER) {
                     processDiscoverTask(task);
-                } else {
+                } else if (task.type == REQUEST_TYPE_REWARD) {
                     processRewardTask(task);
+                } else {
+                    processCustomTask(task);
                 }
             } finally {
                 synchronized (lock) {
@@ -286,7 +414,16 @@ final class DutyRequestQueue {
 
                 if (pendingTasks.isEmpty()) {
                     if (active == 0) {
-                        finishLocked("Queue finished.");
+                        if (medalRepeatInfinite && !medalRepeatStopRequested
+                                && !medalRepeatTargets.isEmpty() && !medalRepeatBlocks.isEmpty()) {
+                            enqueueNextMedalRepeatRoundLocked();
+                            lock.notifyAll();
+                            notifyListenerLocked();
+                            continue;
+                        }
+                        finishLocked(medalRepeatStopRequested
+                                ? "Queue finished after stop supplement."
+                                : "Queue finished.");
                         return null;
                     }
                     waitLocked(120L);
@@ -443,13 +580,58 @@ final class DutyRequestQueue {
         }
     }
 
+    private void processCustomTask(RequestTask task) {
+        ActiveConnection activeConnection = new ActiveConnection();
+        activeConnections.add(activeConnection);
+        try {
+            PvzolAmfClient.Response response = PvzolAmfClient.postRawRequest(
+                    task.target.baseUrl,
+                    task.target.cookies,
+                    task.rawPayload,
+                    activeConnection
+            );
+            if (response.containsFrequentMessage()) {
+                handleFrequentResponse(task, response, task.customOperationLabel);
+                return;
+            }
+            if (response.containsCannotClaimMessage()) {
+                handleCannotClaimResponse(task, response);
+                return;
+            }
+
+            boolean success = response.httpStatusCode >= 200
+                    && response.httpStatusCode < 300
+                    && response.isApplicationSuccess();
+            synchronized (lock) {
+                if (success) {
+                    appendLogLocked(task.target.label + " " + task.customOperationLabel + " success"
+                            + (TextUtils.isEmpty(response.description) ? "" : ": " + response.description));
+                } else {
+                    failed += 1;
+                    appendLogLocked(task.target.label + " " + task.customOperationLabel + " failed"
+                            + " (HTTP=" + response.httpStatusCode
+                            + (TextUtils.isEmpty(response.description) ? "" : ", " + response.description)
+                            + ")");
+                }
+            }
+        } catch (IOException e) {
+            synchronized (lock) {
+                failed += 1;
+                appendLogLocked(task.target.label + " " + task.customOperationLabel + " error: "
+                        + e.getMessage());
+            }
+        } finally {
+            activeConnections.remove(activeConnection);
+        }
+    }
+
     private void handleCannotClaimResponse(RequestTask task, PvzolAmfClient.Response response) {
         synchronized (lock) {
             failed += 1;
             long resumeUptimeMs = SystemClock.uptimeMillis() + CLAIM_BLOCK_INTERVAL_MS;
             cookieCooldownUntilMs.put(task.cookieKey(), Long.valueOf(resumeUptimeMs));
-            appendLogLocked(task.target.label + " ["
-                    + task.rewardId + "," + task.category + "] failed: response contains 不能领取, cooldown "
+            appendLogLocked(task.target.label + " " + task.describeOperation()
+                    + " failed: response contains 不能领取, cooldown "
                     + CLAIM_BLOCK_INTERVAL_MS + "ms"
                     + (TextUtils.isEmpty(response.description) ? "" : ", " + response.description));
             lock.notifyAll();
@@ -475,6 +657,231 @@ final class DutyRequestQueue {
         }
     }
 
+    private void enqueueFubenProgressTasks(CookieTarget target, List<Integer> stages) {
+        if (stages == null || stages.isEmpty()) {
+            return;
+        }
+        ArrayList<Integer> bundledIntegralValues = new ArrayList<>();
+        for (Integer stage : stages) {
+            if (stage == null) {
+                continue;
+            }
+            for (int i = 0; i < 4; i += 1) {
+                bundledIntegralValues.add(Integer.valueOf(stage.intValue()));
+            }
+        }
+        enqueueBundledAwardPacket(target, "integral", bundledIntegralValues, "副本进度 integral 合包");
+    }
+
+    private void enqueueMedalRepeatTasks(
+            CookieTarget target,
+            List<FeaturePanelTaskController.MedalBlockRequest> medalBlocks,
+            java.util.Set<String> medalDailyIntegralKeys,
+            boolean allowIntegral
+    ) {
+        if (medalBlocks == null || medalBlocks.isEmpty()) {
+            return;
+        }
+        ArrayList<Integer> bundledIntegralValues = new ArrayList<>();
+        ArrayList<String> bundledRewardKeys = new ArrayList<>();
+        ArrayList<Integer> bundledMedalValues = new ArrayList<>();
+        for (FeaturePanelTaskController.MedalBlockRequest block : medalBlocks) {
+            if (block == null) {
+                continue;
+            }
+            int blockNumber = block.blockNumber;
+            String dailyIntegralKey = buildMedalDailyIntegralKey(target, blockNumber);
+            boolean shouldRunIntegral = allowIntegral
+                    && shouldRunMedalIntegral(dailyIntegralKey, medalDailyIntegralKeys);
+            if (shouldRunIntegral) {
+                for (int i = 0; i < 4; i += 1) {
+                    bundledIntegralValues.add(Integer.valueOf(blockNumber));
+                }
+            }
+            bundledRewardKeys.add(blockNumber + ".1");
+            for (int rangeIndex = 0; rangeIndex < block.maxClaimRange; rangeIndex += 1) {
+                bundledMedalValues.add(Integer.valueOf(blockNumber));
+            }
+        }
+        enqueueBundledAwardPacket(target, "integral", bundledIntegralValues, "勋章 integral 合包");
+        enqueueBundledRewardPacket(target, bundledRewardKeys, "勋章 reward 合包");
+        enqueueBundledAwardPacket(target, "medal", bundledMedalValues, "勋章 medal 合包");
+    }
+
+    private void enqueueNextMedalRepeatRoundLocked() {
+        int added = 0;
+        for (CookieTarget target : medalRepeatTargets) {
+            int before = total;
+            enqueueMedalRepeatTasks(target, medalRepeatBlocks, Collections.emptySet(), true);
+            enqueueMedalRewardResetOnDayChange(target, medalRepeatBlocks);
+            added += total - before;
+        }
+        if (added > 0) {
+            appendLogLocked("重复领取勋章奖励开始下一轮。新增请求=" + added);
+        }
+    }
+
+    private void enqueueMedalRewardResetOnDayChange(
+            CookieTarget target,
+            List<FeaturePanelTaskController.MedalBlockRequest> medalBlocks
+    ) {
+        if (medalBlocks == null || medalBlocks.isEmpty()) {
+            return;
+        }
+        ArrayList<String> rewardKeys = new ArrayList<>();
+        for (FeaturePanelTaskController.MedalBlockRequest block : medalBlocks) {
+            if (block == null) {
+                continue;
+            }
+            String resetKey = buildMedalRewardResetKey(target, block.blockNumber);
+            if (shouldRunMedalRewardReset(resetKey)) {
+                rewardKeys.add(block.blockNumber + ".1");
+            }
+        }
+        enqueueBundledRewardPacket(target, rewardKeys, "跨天重置副本 reward 合包");
+    }
+
+    private void enqueueStopMedalRewardReset(
+            List<CookieTarget> targets,
+            List<FeaturePanelTaskController.MedalBlockRequest> medalBlocks
+    ) {
+        if (targets == null || targets.isEmpty() || medalBlocks == null || medalBlocks.isEmpty()) {
+            return;
+        }
+        int added = 0;
+        for (CookieTarget target : targets) {
+            ArrayList<String> rewardKeys = new ArrayList<>();
+            for (FeaturePanelTaskController.MedalBlockRequest block : medalBlocks) {
+                if (block == null) {
+                    continue;
+                }
+                rewardKeys.add(block.blockNumber + ".1");
+            }
+            int before = total;
+            enqueueBundledRewardPacket(target, rewardKeys, "停止前重置副本 reward 合包");
+            added += total - before;
+        }
+        if (added > 0) {
+            appendLogLocked("停止前补发重置副本请求=" + added);
+        }
+    }
+
+    private void initializeMedalRewardResetDayState(
+            CookieTarget target,
+            List<FeaturePanelTaskController.MedalBlockRequest> medalBlocks
+    ) {
+        for (FeaturePanelTaskController.MedalBlockRequest block : medalBlocks) {
+            if (block == null) {
+                continue;
+            }
+            String resetKey = buildMedalRewardResetKey(target, block.blockNumber);
+            if (!medalRewardResetDayByKey.containsKey(resetKey)) {
+                medalRewardResetDayByKey.put(resetKey, currentDayString());
+            }
+        }
+    }
+
+    private boolean shouldRunMedalRewardReset(String resetKey) {
+        String today = currentDayString();
+        String lastDay = medalRewardResetDayByKey.get(resetKey);
+        if (!today.equals(lastDay)) {
+            medalRewardResetDayByKey.put(resetKey, today);
+            return true;
+        }
+        return false;
+    }
+
+    private String buildMedalRewardResetKey(CookieTarget target, int blockNumber) {
+        String targetKey = target == null ? "" : target.uniqueKey();
+        return targetKey + "#medalRewardReset#" + blockNumber;
+    }
+
+    private void enqueueBundledAwardPacket(
+            CookieTarget target,
+            String awardType,
+            List<Integer> values,
+            String label
+    ) {
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        try {
+            pendingTasks.add(RequestTask.custom(
+                    target,
+                    PvzolAmfClient.buildBundledFubenAwardPayload(awardType, values),
+                    label + " x" + values.size()
+            ));
+            total += 1;
+        } catch (IOException e) {
+            failed += 1;
+            appendLogLocked(target.label + " " + label + " payload error: " + e.getMessage());
+        }
+    }
+
+    private void enqueueBundledRewardPacket(
+            CookieTarget target,
+            List<String> rewardKeys,
+            String label
+    ) {
+        if (rewardKeys == null || rewardKeys.isEmpty()) {
+            return;
+        }
+        try {
+            pendingTasks.add(RequestTask.custom(
+                    target,
+                    PvzolAmfClient.buildBundledFubenRewardPayload(rewardKeys),
+                    label + " x" + rewardKeys.size()
+            ));
+            total += 1;
+        } catch (IOException e) {
+            failed += 1;
+            appendLogLocked(target.label + " " + label + " payload error: " + e.getMessage());
+        }
+    }
+
+    private void initializeMedalIntegralDayState(
+            CookieTarget target,
+            List<FeaturePanelTaskController.MedalBlockRequest> medalBlocks,
+            java.util.Set<String> medalDailyIntegralKeys
+    ) {
+        for (FeaturePanelTaskController.MedalBlockRequest block : medalBlocks) {
+            if (block == null) {
+                continue;
+            }
+            String dailyIntegralKey = buildMedalDailyIntegralKey(target, block.blockNumber);
+            if (medalDailyIntegralKeys != null && medalDailyIntegralKeys.contains(dailyIntegralKey)) {
+                medalIntegralDayByKey.put(dailyIntegralKey, "");
+            } else if (!medalIntegralDayByKey.containsKey(dailyIntegralKey)) {
+                medalIntegralDayByKey.put(dailyIntegralKey, currentDayString());
+            }
+        }
+    }
+
+    private boolean shouldRunMedalIntegral(String dailyIntegralKey, java.util.Set<String> startPhaseKeys) {
+        String today = currentDayString();
+        String lastDay = medalIntegralDayByKey.get(dailyIntegralKey);
+        if (startPhaseKeys != null && startPhaseKeys.contains(dailyIntegralKey)) {
+            medalIntegralDayByKey.put(dailyIntegralKey, today);
+            return true;
+        }
+        if (!today.equals(lastDay)) {
+            medalIntegralDayByKey.put(dailyIntegralKey, today);
+            return true;
+        }
+        return false;
+    }
+
+    private String currentDayString() {
+        synchronized (DAY_FORMAT) {
+            return DAY_FORMAT.format(new java.util.Date());
+        }
+    }
+
+    private String buildMedalDailyIntegralKey(CookieTarget target, int blockNumber) {
+        String targetKey = target == null ? "" : target.uniqueKey();
+        return targetKey + "#medalIntegral#" + blockNumber;
+    }
+
     private void finishLocked(String message) {
         running = false;
         paused = false;
@@ -483,6 +890,12 @@ final class DutyRequestQueue {
         pendingTasks.clear();
         inFlightCookieKeys.clear();
         cookieCooldownUntilMs.clear();
+        medalIntegralDayByKey.clear();
+        medalRewardResetDayByKey.clear();
+        medalRepeatInfinite = false;
+        medalRepeatStopRequested = false;
+        medalRepeatTargets = Collections.emptyList();
+        medalRepeatBlocks = Collections.emptyList();
         if (executor != null) {
             executor.shutdown();
             executor = null;
@@ -544,24 +957,46 @@ final class DutyRequestQueue {
         final CookieTarget target;
         final int rewardId;
         final int category;
+        final byte[] rawPayload;
+        final String customOperationLabel;
 
-        private RequestTask(int type, CookieTarget target, int rewardId, int category) {
+        private RequestTask(
+                int type,
+                CookieTarget target,
+                int rewardId,
+                int category,
+                byte[] rawPayload,
+                String customOperationLabel
+        ) {
             this.type = type;
             this.target = target;
             this.rewardId = rewardId;
             this.category = category;
+            this.rawPayload = rawPayload;
+            this.customOperationLabel = customOperationLabel;
         }
 
         String cookieKey() {
             return target.uniqueKey();
         }
 
+        String describeOperation() {
+            if (type == REQUEST_TYPE_REWARD) {
+                return "[" + rewardId + "," + category + "]";
+            }
+            return customOperationLabel == null ? "request" : customOperationLabel;
+        }
+
         static RequestTask discovery(CookieTarget target) {
-            return new RequestTask(REQUEST_TYPE_DISCOVER, target, 0, 0);
+            return new RequestTask(REQUEST_TYPE_DISCOVER, target, 0, 0, null, null);
         }
 
         static RequestTask reward(CookieTarget target, int rewardId, int category) {
-            return new RequestTask(REQUEST_TYPE_REWARD, target, rewardId, category);
+            return new RequestTask(REQUEST_TYPE_REWARD, target, rewardId, category, null, null);
+        }
+
+        static RequestTask custom(CookieTarget target, byte[] rawPayload, String customOperationLabel) {
+            return new RequestTask(REQUEST_TYPE_CUSTOM, target, 0, 0, rawPayload, customOperationLabel);
         }
     }
 

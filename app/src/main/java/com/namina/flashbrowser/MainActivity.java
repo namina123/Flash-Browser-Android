@@ -1317,8 +1317,33 @@ final class FeaturePanelDialogController {
     private Button cancelButton;
     private CheckBox dailyDutyCheckBox;
     private CheckBox fullSweepCheckBox;
+    private CheckBox fubenProgressCheckBox;
+    private View fubenProgressSettingsLayout;
+    private Button fubenProgressSettingsButton;
+    private Button fubenProgressRunButton;
+    private CheckBox fubenProgressStage1CheckBox;
+    private CheckBox fubenProgressStage2CheckBox;
+    private CheckBox fubenProgressStage3CheckBox;
+    private CheckBox fubenProgressStage4CheckBox;
+    private CheckBox fubenProgressStage5CheckBox;
+    private CheckBox medalRepeatCheckBox;
+    private CheckBox medalRepeatInfiniteCheckBox;
+    private View medalRepeatSettingsLayout;
+    private Button medalRepeatSettingsButton;
+    private Button medalRepeatRunButton;
+    private CheckBox medalBlock1CheckBox;
+    private CheckBox medalBlock2CheckBox;
+    private CheckBox medalBlock3CheckBox;
+    private CheckBox medalBlock4CheckBox;
+    private CheckBox medalBlock5CheckBox;
+    private Spinner medalBlock1RangeSpinner;
+    private Spinner medalBlock2RangeSpinner;
+    private Spinner medalBlock3RangeSpinner;
+    private Spinner medalBlock4RangeSpinner;
+    private Spinner medalBlock5RangeSpinner;
     private Button dailyDutyRunButton;
     private Button fullSweepRunButton;
+    private Button fubenResetRunButton;
     private Button startSelectedButton;
     private Button storageAccessButton;
     private TextView repositoryHintText;
@@ -1432,6 +1457,31 @@ final class FeaturePanelDialogController {
         cancelButton = dialogView.findViewById(R.id.btn_panel_cancel);
         dailyDutyCheckBox = dialogView.findViewById(R.id.check_panel_daily_duty);
         fullSweepCheckBox = dialogView.findViewById(R.id.check_panel_duty_full_sweep);
+        fubenProgressCheckBox = dialogView.findViewById(R.id.check_panel_fuben_progress);
+        fubenProgressSettingsLayout = dialogView.findViewById(R.id.layout_panel_fuben_progress_settings);
+        fubenProgressSettingsButton = dialogView.findViewById(R.id.btn_panel_fuben_progress_settings);
+        fubenProgressRunButton = dialogView.findViewById(R.id.btn_panel_fuben_progress_run);
+        fubenProgressStage1CheckBox = dialogView.findViewById(R.id.check_panel_fuben_progress_stage_1);
+        fubenProgressStage2CheckBox = dialogView.findViewById(R.id.check_panel_fuben_progress_stage_2);
+        fubenProgressStage3CheckBox = dialogView.findViewById(R.id.check_panel_fuben_progress_stage_3);
+        fubenProgressStage4CheckBox = dialogView.findViewById(R.id.check_panel_fuben_progress_stage_4);
+        fubenProgressStage5CheckBox = dialogView.findViewById(R.id.check_panel_fuben_progress_stage_5);
+        medalRepeatCheckBox = dialogView.findViewById(R.id.check_panel_medal_repeat);
+        medalRepeatInfiniteCheckBox = dialogView.findViewById(R.id.check_panel_medal_repeat_infinite);
+        medalRepeatSettingsLayout = dialogView.findViewById(R.id.layout_panel_medal_repeat_settings);
+        medalRepeatSettingsButton = dialogView.findViewById(R.id.btn_panel_medal_repeat_settings);
+        medalRepeatRunButton = dialogView.findViewById(R.id.btn_panel_medal_repeat_run);
+        fubenResetRunButton = dialogView.findViewById(R.id.btn_panel_fuben_reset);
+        medalBlock1CheckBox = dialogView.findViewById(R.id.check_panel_medal_block_1);
+        medalBlock2CheckBox = dialogView.findViewById(R.id.check_panel_medal_block_2);
+        medalBlock3CheckBox = dialogView.findViewById(R.id.check_panel_medal_block_3);
+        medalBlock4CheckBox = dialogView.findViewById(R.id.check_panel_medal_block_4);
+        medalBlock5CheckBox = dialogView.findViewById(R.id.check_panel_medal_block_5);
+        medalBlock1RangeSpinner = dialogView.findViewById(R.id.spinner_panel_medal_block_1_range);
+        medalBlock2RangeSpinner = dialogView.findViewById(R.id.spinner_panel_medal_block_2_range);
+        medalBlock3RangeSpinner = dialogView.findViewById(R.id.spinner_panel_medal_block_3_range);
+        medalBlock4RangeSpinner = dialogView.findViewById(R.id.spinner_panel_medal_block_4_range);
+        medalBlock5RangeSpinner = dialogView.findViewById(R.id.spinner_panel_medal_block_5_range);
         dailyDutyRunButton = dialogView.findViewById(R.id.btn_panel_daily_duty_run);
         fullSweepRunButton = dialogView.findViewById(R.id.btn_panel_duty_full_sweep_run);
         startSelectedButton = dialogView.findViewById(R.id.btn_panel_start_selected);
@@ -1469,6 +1519,9 @@ final class FeaturePanelDialogController {
                 cancelButton,
                 dailyDutyRunButton,
                 fullSweepRunButton,
+                fubenProgressRunButton,
+                fubenResetRunButton,
+                medalRepeatRunButton,
                 startSelectedButton
         );
         repositoryController.bind(
@@ -1492,6 +1545,31 @@ final class FeaturePanelDialogController {
         frequentRetryIntervalInput.setText(String.valueOf(taskController.getSavedFrequentRetryInterval()));
         dailyDutyCheckBox.setChecked(preferenceStore.isPanelDailyDutyEnabled());
         fullSweepCheckBox.setChecked(preferenceStore.isPanelDutyFullSweepEnabled());
+        fubenProgressCheckBox.setChecked(preferenceStore.isPanelFubenProgressEnabled());
+        medalRepeatCheckBox.setChecked(preferenceStore.isPanelMedalRepeatEnabled());
+        medalRepeatInfiniteCheckBox.setChecked(preferenceStore.isMedalRepeatInfiniteEnabled());
+        fubenProgressStage1CheckBox.setChecked(preferenceStore.isFubenProgressStageSelected(1));
+        fubenProgressStage2CheckBox.setChecked(preferenceStore.isFubenProgressStageSelected(2));
+        fubenProgressStage3CheckBox.setChecked(preferenceStore.isFubenProgressStageSelected(3));
+        fubenProgressStage4CheckBox.setChecked(preferenceStore.isFubenProgressStageSelected(4));
+        fubenProgressStage5CheckBox.setChecked(preferenceStore.isFubenProgressStageSelected(5));
+        medalBlock1CheckBox.setChecked(preferenceStore.isMedalBlockEnabled(1));
+        medalBlock2CheckBox.setChecked(preferenceStore.isMedalBlockEnabled(2));
+        medalBlock3CheckBox.setChecked(preferenceStore.isMedalBlockEnabled(3));
+        medalBlock4CheckBox.setChecked(preferenceStore.isMedalBlockEnabled(4));
+        medalBlock5CheckBox.setChecked(preferenceStore.isMedalBlockEnabled(5));
+        configureMedalRangeSpinner(medalBlock1RangeSpinner);
+        configureMedalRangeSpinner(medalBlock2RangeSpinner);
+        configureMedalRangeSpinner(medalBlock3RangeSpinner);
+        configureMedalRangeSpinner(medalBlock4RangeSpinner);
+        configureMedalRangeSpinner(medalBlock5RangeSpinner);
+        setSpinnerSelection(medalBlock1RangeSpinner, preferenceStore.getMedalBlockRange(1));
+        setSpinnerSelection(medalBlock2RangeSpinner, preferenceStore.getMedalBlockRange(2));
+        setSpinnerSelection(medalBlock3RangeSpinner, preferenceStore.getMedalBlockRange(3));
+        setSpinnerSelection(medalBlock4RangeSpinner, preferenceStore.getMedalBlockRange(4));
+        setSpinnerSelection(medalBlock5RangeSpinner, preferenceStore.getMedalBlockRange(5));
+        fubenProgressSettingsLayout.setVisibility(preferenceStore.isFubenSettingsExpanded() ? View.VISIBLE : View.GONE);
+        medalRepeatSettingsLayout.setVisibility(preferenceStore.isMedalSettingsExpanded() ? View.VISIBLE : View.GONE);
     }
 
     private void bindActions() {
@@ -1499,6 +1577,45 @@ final class FeaturePanelDialogController {
                 preferenceStore.setPanelDailyDutyEnabled(isChecked));
         fullSweepCheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
                 preferenceStore.setPanelDutyFullSweepEnabled(isChecked));
+        fubenProgressCheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setPanelFubenProgressEnabled(isChecked));
+        medalRepeatCheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setPanelMedalRepeatEnabled(isChecked));
+        medalRepeatInfiniteCheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setMedalRepeatInfiniteEnabled(isChecked));
+        fubenProgressStage1CheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setFubenProgressStageSelected(1, isChecked));
+        fubenProgressStage2CheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setFubenProgressStageSelected(2, isChecked));
+        fubenProgressStage3CheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setFubenProgressStageSelected(3, isChecked));
+        fubenProgressStage4CheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setFubenProgressStageSelected(4, isChecked));
+        fubenProgressStage5CheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setFubenProgressStageSelected(5, isChecked));
+        medalBlock1CheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setMedalBlockEnabled(1, isChecked));
+        medalBlock2CheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setMedalBlockEnabled(2, isChecked));
+        medalBlock3CheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setMedalBlockEnabled(3, isChecked));
+        medalBlock4CheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setMedalBlockEnabled(4, isChecked));
+        medalBlock5CheckBox.setOnCheckedChangeListener((buttonView, isChecked) ->
+                preferenceStore.setMedalBlockEnabled(5, isChecked));
+        bindMedalRangeSpinner(medalBlock1RangeSpinner, 1);
+        bindMedalRangeSpinner(medalBlock2RangeSpinner, 2);
+        bindMedalRangeSpinner(medalBlock3RangeSpinner, 3);
+        bindMedalRangeSpinner(medalBlock4RangeSpinner, 4);
+        bindMedalRangeSpinner(medalBlock5RangeSpinner, 5);
+        fubenProgressSettingsButton.setOnClickListener(v -> toggleSettingsVisibility(
+                fubenProgressSettingsLayout,
+                true
+        ));
+        medalRepeatSettingsButton.setOnClickListener(v -> toggleSettingsVisibility(
+                medalRepeatSettingsLayout,
+                false
+        ));
         tabCookieButton.setOnClickListener(v -> switchTab(TAB_COOKIE));
         tabBasicButton.setOnClickListener(v -> switchTab(TAB_BASIC));
         tabRepositoryButton.setOnClickListener(v -> switchTab(TAB_REPOSITORY));
@@ -1532,6 +1649,11 @@ final class FeaturePanelDialogController {
                 startTaskRequests(false, FeaturePanelTaskController.TaskMode.DAILY_DUTY));
         fullSweepRunButton.setOnClickListener(v ->
                 startTaskRequests(false, FeaturePanelTaskController.TaskMode.FULL_SWEEP));
+        fubenProgressRunButton.setOnClickListener(v ->
+                startTaskRequests(false, FeaturePanelTaskController.TaskMode.FUBEN_PROGRESS));
+        medalRepeatRunButton.setOnClickListener(v ->
+                startTaskRequests(false, FeaturePanelTaskController.TaskMode.MEDAL_REPEAT));
+        fubenResetRunButton.setOnClickListener(v -> startFubenResetRequests());
         startSelectedButton.setOnClickListener(v -> startTaskRequests(true, null));
         storageAccessButton.setOnClickListener(v -> requestAllFilesAccessAction.run());
     }
@@ -1608,12 +1730,34 @@ final class FeaturePanelDialogController {
 
         boolean dailyDutyChecked = dailyDutyCheckBox != null && dailyDutyCheckBox.isChecked();
         boolean fullSweepChecked = fullSweepCheckBox != null && fullSweepCheckBox.isChecked();
+        boolean fubenProgressChecked = fubenProgressCheckBox != null && fubenProgressCheckBox.isChecked();
+        boolean medalRepeatChecked = medalRepeatCheckBox != null && medalRepeatCheckBox.isChecked();
+        boolean medalRepeatInfinite = medalRepeatInfiniteCheckBox != null
+                && medalRepeatInfiniteCheckBox.isChecked();
+        boolean[] fubenProgressSelections = collectFubenProgressSelections();
+        boolean[] medalBlockSelections = collectMedalBlockSelections();
+        String[] medalBlockRangeValues = collectMedalBlockRangeValues();
         if (forcedTaskMode == FeaturePanelTaskController.TaskMode.DAILY_DUTY) {
             dailyDutyChecked = true;
             fullSweepChecked = false;
+            fubenProgressChecked = false;
+            medalRepeatChecked = false;
         } else if (forcedTaskMode == FeaturePanelTaskController.TaskMode.FULL_SWEEP) {
             dailyDutyChecked = false;
             fullSweepChecked = true;
+            fubenProgressChecked = false;
+            medalRepeatChecked = false;
+        } else if (forcedTaskMode == FeaturePanelTaskController.TaskMode.FUBEN_PROGRESS) {
+            dailyDutyChecked = false;
+            fullSweepChecked = false;
+            fubenProgressChecked = true;
+            medalRepeatChecked = false;
+            medalRepeatInfinite = false;
+        } else if (forcedTaskMode == FeaturePanelTaskController.TaskMode.MEDAL_REPEAT) {
+            dailyDutyChecked = false;
+            fullSweepChecked = false;
+            fubenProgressChecked = false;
+            medalRepeatChecked = true;
         }
         FeaturePanelTaskController.BuildResult buildResult = taskController.buildStartRequest(
                 featureCookieChoices,
@@ -1622,6 +1766,12 @@ final class FeaturePanelDialogController {
                 frequentRetryIntervalInput.getText().toString(),
                 dailyDutyChecked,
                 fullSweepChecked,
+                fubenProgressChecked,
+                fubenProgressSelections,
+                medalRepeatChecked,
+                medalBlockSelections,
+                medalBlockRangeValues,
+                medalRepeatInfinite,
                 startCheckedItemsOnly
         );
         concurrencyInput.setText(String.valueOf(taskController.getSavedConcurrency()));
@@ -1633,13 +1783,76 @@ final class FeaturePanelDialogController {
         }
 
         FeaturePanelTaskController.StartRequest request = buildResult.request;
-        dutyRequestQueue.startDailyDutyRewards(
-                request.targets,
-                request.concurrency,
-                request.requestIntervalMs,
-                request.frequentRetryIntervalMs,
-                request.taskMode == FeaturePanelTaskController.TaskMode.FULL_SWEEP
+        prepareDailyMedalIntegralState(request);
+        dutyRequestQueue.startRequests(request);
+    }
+
+    private void startFubenResetRequests() {
+        if (concurrencyInput == null
+                || requestIntervalInput == null
+                || frequentRetryIntervalInput == null) {
+            return;
+        }
+        if (dutyRequestQueue.isBusy()) {
+            Toast.makeText(activity, "Request queue is already running", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int concurrency = parsePositiveInt(concurrencyInput.getText().toString(), 1);
+        int requestIntervalMs = parseNonNegativeInt(requestIntervalInput.getText().toString(), 700);
+        int frequentRetryIntervalMs = parseNonNegativeInt(
+                frequentRetryIntervalInput.getText().toString(),
+                14000
         );
+
+        LinkedHashMap<String, DutyRequestQueue.CookieTarget> deduplicatedTargets = new LinkedHashMap<>();
+        for (FeatureCookieChoice choice : featureCookieChoices) {
+            if (!choice.selected || TextUtils.isEmpty(choice.baseUrl) || TextUtils.isEmpty(choice.cookies)) {
+                continue;
+            }
+            String key = choice.baseUrl + "\n" + choice.cookies;
+            if (!deduplicatedTargets.containsKey(key)) {
+                deduplicatedTargets.put(key, new DutyRequestQueue.CookieTarget(
+                        choice.currentPage ? "当前页面 Cookie" : choice.label,
+                        choice.baseUrl,
+                        choice.cookies
+                ));
+            }
+        }
+
+        if (deduplicatedTargets.isEmpty()) {
+            Toast.makeText(activity, "请先勾选至少一个可用 Cookie。", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        dutyRequestQueue.startFubenResetRequests(
+                new ArrayList<>(deduplicatedTargets.values()),
+                concurrency,
+                requestIntervalMs,
+                frequentRetryIntervalMs
+        );
+    }
+
+    private int parsePositiveInt(String value, int fallback) {
+        if (TextUtils.isEmpty(value)) {
+            return Math.max(1, fallback);
+        }
+        try {
+            return Math.max(1, Integer.parseInt(value.trim()));
+        } catch (Exception e) {
+            return Math.max(1, fallback);
+        }
+    }
+
+    private int parseNonNegativeInt(String value, int fallback) {
+        if (TextUtils.isEmpty(value)) {
+            return Math.max(0, fallback);
+        }
+        try {
+            return Math.max(0, Integer.parseInt(value.trim()));
+        } catch (Exception e) {
+            return Math.max(0, fallback);
+        }
     }
 
     private void clearReferences() {
@@ -1662,8 +1875,33 @@ final class FeaturePanelDialogController {
         cancelButton = null;
         dailyDutyCheckBox = null;
         fullSweepCheckBox = null;
+        fubenProgressCheckBox = null;
+        fubenProgressSettingsLayout = null;
+        fubenProgressSettingsButton = null;
+        fubenProgressRunButton = null;
+        fubenProgressStage1CheckBox = null;
+        fubenProgressStage2CheckBox = null;
+        fubenProgressStage3CheckBox = null;
+        fubenProgressStage4CheckBox = null;
+        fubenProgressStage5CheckBox = null;
+        medalRepeatCheckBox = null;
+        medalRepeatInfiniteCheckBox = null;
+        medalRepeatSettingsLayout = null;
+        medalRepeatSettingsButton = null;
+        medalRepeatRunButton = null;
+        medalBlock1CheckBox = null;
+        medalBlock2CheckBox = null;
+        medalBlock3CheckBox = null;
+        medalBlock4CheckBox = null;
+        medalBlock5CheckBox = null;
+        medalBlock1RangeSpinner = null;
+        medalBlock2RangeSpinner = null;
+        medalBlock3RangeSpinner = null;
+        medalBlock4RangeSpinner = null;
+        medalBlock5RangeSpinner = null;
         dailyDutyRunButton = null;
         fullSweepRunButton = null;
+        fubenResetRunButton = null;
         startSelectedButton = null;
         storageAccessButton = null;
         repositoryHintText = null;
@@ -1684,6 +1922,132 @@ final class FeaturePanelDialogController {
         uiController.clear();
         repositoryController.clear();
         featureCookieChoices.clear();
+    }
+
+    private void toggleSettingsVisibility(View targetView, boolean fubenSettings) {
+        if (targetView == null) {
+            return;
+        }
+        boolean expanded = targetView.getVisibility() != View.VISIBLE;
+        targetView.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        if (fubenSettings) {
+            preferenceStore.setFubenSettingsExpanded(expanded);
+        } else {
+            preferenceStore.setMedalSettingsExpanded(expanded);
+        }
+    }
+
+    private void configureMedalRangeSpinner(Spinner spinner) {
+        if (spinner == null) {
+            return;
+        }
+        ArrayList<String> values = new ArrayList<>();
+        values.add("1");
+        values.add("2");
+        values.add("3");
+        values.add("4");
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                activity,
+                android.R.layout.simple_spinner_item,
+                values
+        );
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        spinner.setSelection(3, false);
+    }
+
+    private void setSpinnerSelection(Spinner spinner, int value) {
+        if (spinner == null) {
+            return;
+        }
+        int index = value - 1;
+        if (index < 0) {
+            index = 0;
+        }
+        if (index > 3) {
+            index = 3;
+        }
+        spinner.setSelection(index, false);
+    }
+
+    private void bindMedalRangeSpinner(Spinner spinner, int blockNumber) {
+        if (spinner == null) {
+            return;
+        }
+        spinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                preferenceStore.setMedalBlockRange(blockNumber, position + 1);
+            }
+
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> parent) {
+            }
+        });
+    }
+
+    private boolean[] collectFubenProgressSelections() {
+        return new boolean[] {
+                fubenProgressStage1CheckBox != null && fubenProgressStage1CheckBox.isChecked(),
+                fubenProgressStage2CheckBox != null && fubenProgressStage2CheckBox.isChecked(),
+                fubenProgressStage3CheckBox != null && fubenProgressStage3CheckBox.isChecked(),
+                fubenProgressStage4CheckBox != null && fubenProgressStage4CheckBox.isChecked(),
+                fubenProgressStage5CheckBox != null && fubenProgressStage5CheckBox.isChecked()
+        };
+    }
+
+    private boolean[] collectMedalBlockSelections() {
+        return new boolean[] {
+                medalBlock1CheckBox != null && medalBlock1CheckBox.isChecked(),
+                medalBlock2CheckBox != null && medalBlock2CheckBox.isChecked(),
+                medalBlock3CheckBox != null && medalBlock3CheckBox.isChecked(),
+                medalBlock4CheckBox != null && medalBlock4CheckBox.isChecked(),
+                medalBlock5CheckBox != null && medalBlock5CheckBox.isChecked()
+        };
+    }
+
+    private String[] collectMedalBlockRangeValues() {
+        return new String[] {
+                getSpinnerValue(medalBlock1RangeSpinner),
+                getSpinnerValue(medalBlock2RangeSpinner),
+                getSpinnerValue(medalBlock3RangeSpinner),
+                getSpinnerValue(medalBlock4RangeSpinner),
+                getSpinnerValue(medalBlock5RangeSpinner)
+        };
+    }
+
+    private String getSpinnerValue(Spinner spinner) {
+        if (spinner == null || spinner.getSelectedItem() == null) {
+            return "4";
+        }
+        return String.valueOf(spinner.getSelectedItem());
+    }
+
+    private void prepareDailyMedalIntegralState(FeaturePanelTaskController.StartRequest request) {
+        if (request == null || request.targets == null || request.medalBlockRequests == null) {
+            return;
+        }
+        request.medalDailyIntegralKeys.clear();
+        for (DutyRequestQueue.CookieTarget target : request.targets) {
+            if (target == null) {
+                continue;
+            }
+            String targetCookieKey = target.uniqueKey();
+            for (FeaturePanelTaskController.MedalBlockRequest block : request.medalBlockRequests) {
+                if (block == null) {
+                    continue;
+                }
+                if (preferenceStore.shouldRunDailyMedalIntegral(targetCookieKey, block.blockNumber)) {
+                    request.medalDailyIntegralKeys.add(buildMedalDailyIntegralRequestKey(target, block.blockNumber));
+                    preferenceStore.markDailyMedalIntegralDone(targetCookieKey, block.blockNumber);
+                }
+            }
+        }
+    }
+
+    private String buildMedalDailyIntegralRequestKey(DutyRequestQueue.CookieTarget target, int blockNumber) {
+        String targetKey = target == null ? "" : target.uniqueKey();
+        return targetKey + "#medalIntegral#" + blockNumber;
     }
 
     private int dpToPx(int dp) {
